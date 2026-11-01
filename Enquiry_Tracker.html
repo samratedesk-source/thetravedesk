@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0F3D3E">
+  <title>Enquiry Tracker — The Travel Desk</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+      background: #FAF6EE;
+      color: #20302E;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    .standalone-header {
+      height: 56px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: #0F3D3E;
+      color: #FFFDF8;
+    }
+    .standalone-header h1 {
+      margin: 0;
+      font: 700 14px "Courier New", monospace;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .standalone-header p { margin: 3px 0 0; color: #DED2B4; font-size: 11px; }
+    .standalone-nav {
+      flex: 0 0 auto;
+      max-width: 260px;
+      padding: 8px 10px;
+      border: 1px solid #D9A85C;
+      border-radius: 4px;
+      background: #0F3D3E;
+      color: #FFFDF8;
+      font: 11px "Courier New", monospace;
+      cursor: pointer;
+    }
+    .standalone-nav:focus-visible { outline: 2px solid #D9A85C; outline-offset: 2px; }
+    iframe {
+      display: block;
+      width: 100%;
+      height: calc(100% - 56px);
+      border: 0;
+      background: #FAF6EE;
+    }
+    @media (max-width: 520px) {
+      .standalone-header { height: 64px; padding: 0 10px; }
+      .standalone-header h1 { font-size: 11px; }
+      .standalone-header p { font-size: 10px; }
+      .standalone-nav { max-width: 180px; padding: 7px; font-size: 10px; }
+      iframe { height: calc(100% - 64px); }
+    }
+  </style>
+</head>
+<body>
+  <header class="standalone-header">
+    <div>
+      <h1>📈 Enquiry Tracker</h1>
+      <p>Connected to your Travel Desk enquiries, quotes, and customer records</p>
+    </div>
+    <select class="standalone-nav" aria-label="Switch Travel Desk view" data-current="Enquiry_Tracker.html" onchange="const frame=document.querySelector('iframe'); try { const app=frame?.contentWindow; if(!app || typeof app.rateDeskPersistFullAutoBackup!=='function' || app.rateDeskPersistFullAutoBackup()===false) throw new Error('Current view backup could not be confirmed'); app.rateDeskAllowNavigation=true; } catch(error) { console.error('Could not save before switching views:',error); alert('Could not save the current view. Check storage status before switching.'); this.value=this.dataset.current; return; } if(this.value) window.location.assign(this.value)">
+      <option value="Hotel_Master.html">🏨 Hotel Master</option><option value="Cab_Master.html">🚐 Cab Master</option><option value="Activities.html">🪂 Activities</option><option value="Itinerary.html">🗺 Itinerary</option><option value="Saved_Quotes.html">🗂 Saved Quotes</option><option value="Company_Profile.html">🏢 Company Profile</option><option value="Backup.html">💾 Backup</option><option value="Enquiry_Tracker.html">📈 Enquiry Tracker</option><option value="Holiday_Packages.html">🌴 Holiday Packages</option><option value="Booking_Payment_Tracker.html">💳 Booking & Payment Tracker</option><option value="Index.html">🏠 The Travel Desk CRM</option>
+    </select>
+  </header>
+  <iframe title="Travel Desk Enquiry Tracker" src="Index.html?standalone=enquiry"
+  ></iframe>
+</body>
+</html>
