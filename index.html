@@ -1,17 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- GOOGLE DRIVE AUTO BACKUP & RESTORE - 100% FREE - Added by Misty Voyages Support -->
+<!-- GOOGLE DRIVE AUTO BACKUP v2 - POST Support for Large Files - 100% Free -->
 <script>
 const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbxwyPbo6Vjot3_6qQBsYLNUDU6aqsExIDm2akrd9BBTYZJKkoNZ0kInQYzRNkkiPFMO/exec';
-console.log('☁️ Travel Desk Drive Backup Initialized - Open: Auto Restore, Close: Auto Backup');
+console.log('☁️ Travel Desk Drive Backup v2 Initialized (POST Support)');
+
 async function autoRestoreFromDrive(){
   try{
-    const res = await fetch(DRIVE_BACKUP_URL + '?action=load');
+    const res = await fetch(DRIVE_BACKUP_URL + '?action=load', {method: 'GET'});
     const text = await res.text();
     let backup;
-    try{ backup = JSON.parse(text); }catch{ return; }
-    if(backup.error){ console.log('No backup found yet'); return; }
+    try{ backup = JSON.parse(text); }catch{ console.log('No backup yet'); return; }
+    if(backup.error){ console.log('No backup in Drive yet'); return; }
     let count=0;
     Object.keys(backup).forEach(k=>{
       if(k==='_backupMeta') return;
@@ -20,11 +21,13 @@ async function autoRestoreFromDrive(){
       count++;
     });
     if(count>0){
-      console.log(`✅ Restored ${count} items from Drive - ${backup._backupMeta?.timestamp}`);
-      setTimeout(()=>{ if(confirm(`✅ Auto Restored ${count} items from Drive backup (${new Date(backup._backupMeta.timestamp).toLocaleString()}). Reload page to see restored data?`)) location.reload(); }, 1200);
+      console.log(`✅ Restored ${count} items from Drive`);
+      const time = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
+      setTimeout(()=>{ if(confirm(`✅ Auto Restored ${count} items from Drive backup (${time}). Reload page?`)) location.reload(); }, 1000);
     }
   }catch(e){ console.log('Restore error', e); }
 }
+
 async function autoBackupToDrive(){
   try{
     const allData={};
@@ -34,18 +37,34 @@ async function autoBackupToDrive(){
     }
     if(Object.keys(allData).length===0) return;
     allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length};
-    const dataStr=JSON.stringify(allData);
-    await fetch(DRIVE_BACKUP_URL + '?action=save&data='+encodeURIComponent(dataStr),{method:'GET',mode:'no-cors'});
-    console.log('✅ Auto Backup to Drive triggered - '+new Date().toLocaleString());
+    const jsonStr = JSON.stringify(allData);
+    
+    // Use POST for large data
+    await fetch(DRIVE_BACKUP_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({data: jsonStr})
+    });
+    console.log('✅ Auto Backup to Drive (POST) - ' + new Date().toLocaleString() + ' - Size: ' + (jsonStr.length/1024/1024).toFixed(2) + ' MB');
+    
+    // Also show in UI if element exists
+    const el = document.getElementById('driveBackupStatus');
+    if(el){ el.textContent = '✅ Backed up ' + (jsonStr.length/1024/1024).toFixed(2) + ' MB at ' + new Date().toLocaleTimeString(); el.style.display='block'; }
+    
   }catch(e){ console.log('Backup error', e); }
 }
-window.addEventListener('load',()=>{ setTimeout(autoRestoreFromDrive,1500); });
+
+window.addEventListener('load',()=>{ setTimeout(autoRestoreFromDrive, 1500); });
 window.addEventListener('beforeunload',()=>{ autoBackupToDrive(); });
-setInterval(autoBackupToDrive, 5*60*1000);
+setInterval(autoBackupToDrive, 3*60*1000); // Every 3 minutes
+
+// Manual functions for console
 window.manualBackup = autoBackupToDrive;
 window.manualRestore = autoRestoreFromDrive;
+window.backupToDrive = autoBackupToDrive;
 </script>
-<!-- END GOOGLE DRIVE AUTO BACKUP -->
+<!-- END GOOGLE DRIVE AUTO BACKUP v2 -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
