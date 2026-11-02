@@ -1,70 +1,93 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- GOOGLE DRIVE AUTO BACKUP v2 - POST Support for Large Files - 100% Free -->
+<!-- GOOGLE DRIVE AUTO BACKUP v5 - FINAL - New Deployment - Quota & CORS Fixed -->
 <script>
-const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbxwyPbo6Vjot3_6qQBsYLNUDU6aqsExIDm2akrd9BBTYZJKkoNZ0kInQYzRNkkiPFMO/exec';
-console.log('☁️ Travel Desk Drive Backup v2 Initialized (POST Support)');
+const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
+console.log('☁️ Travel Desk Drive Backup v5 FINAL - URL: ' + DRIVE_BACKUP_URL);
+
+function jsonpLoad(url, callback) {
+  const cbName = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
+  window[cbName] = function(data) {
+    try { delete window[cbName]; } catch(e){ window[cbName]=undefined; }
+    try { document.body.removeChild(script); } catch(e){}
+    callback(data);
+  };
+  const script = document.createElement('script');
+  script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cbName;
+  script.onerror = function() {
+    try { delete window[cbName]; } catch(e){}
+    try { document.body.removeChild(script); } catch(e){}
+    callback({error: 'JSONP failed'});
+  };
+  document.body.appendChild(script);
+}
 
 async function autoRestoreFromDrive(){
-  try{
-    const res = await fetch(DRIVE_BACKUP_URL + '?action=load', {method: 'GET'});
-    const text = await res.text();
-    let backup;
-    try{ backup = JSON.parse(text); }catch{ console.log('No backup yet'); return; }
-    if(backup.error){ console.log('No backup in Drive yet'); return; }
-    let count=0;
-    Object.keys(backup).forEach(k=>{
-      if(k==='_backupMeta') return;
-      const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k];
-      localStorage.setItem(k,v);
-      count++;
-    });
-    if(count>0){
-      console.log(`✅ Restored ${count} items from Drive`);
-      const time = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
-      setTimeout(()=>{ if(confirm(`✅ Auto Restored ${count} items from Drive backup (${time}). Reload page?`)) location.reload(); }, 1000);
-    }
-  }catch(e){ console.log('Restore error', e); }
+  return new Promise((resolve) => {
+    try{
+      console.log('🔄 Restoring from Drive v5...');
+      jsonpLoad(DRIVE_BACKUP_URL + '?action=load', function(backup) {
+        if(!backup || backup.error){ console.log('No Drive backup yet:', backup?.error); resolve(); return; }
+        let restored=0, skipped=0;
+        Object.keys(backup).forEach(k=>{
+          if(k==='_backupMeta') return;
+          if(k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup')) { skipped++; return; }
+          try{
+            const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k];
+            localStorage.setItem(k,v);
+            restored++;
+          }catch(e){ skipped++; }
+        });
+        console.log(`✅ Restored ${restored} items (skipped ${skipped} internal)`);
+        if(restored>0){
+          const t = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
+          setTimeout(()=>{ if(confirm(`✅ Restored ${restored} items from Drive (${t}). Reload?`)) location.reload(); }, 800);
+        }
+        resolve();
+      });
+    }catch(e){ console.log('Restore error', e); resolve(); }
+  });
 }
 
 async function autoBackupToDrive(){
   try{
     const allData={};
+    let totalSize=0;
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
-      if(k){ try{ allData[k]=JSON.parse(localStorage.getItem(k)); }catch{ allData[k]=localStorage.getItem(k); } }
+      if(!k) continue;
+      if(k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup')) continue;
+      try{
+        const val = localStorage.getItem(k);
+        totalSize += val ? val.length : 0;
+        try{ allData[k]=JSON.parse(val); }catch{ allData[k]=val; }
+      }catch(e){}
     }
     if(Object.keys(allData).length===0) return;
-    allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length};
+    allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length, sizeKB: Math.round(totalSize/1024)};
     const jsonStr = JSON.stringify(allData);
-    
-    // Use POST for large data
-    await fetch(DRIVE_BACKUP_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({data: jsonStr})
-    });
-    console.log('✅ Auto Backup to Drive (POST) - ' + new Date().toLocaleString() + ' - Size: ' + (jsonStr.length/1024/1024).toFixed(2) + ' MB');
-    
-    // Also show in UI if element exists
-    const el = document.getElementById('driveBackupStatus');
-    if(el){ el.textContent = '✅ Backed up ' + (jsonStr.length/1024/1024).toFixed(2) + ' MB at ' + new Date().toLocaleTimeString(); el.style.display='block'; }
-    
+    try{ localStorage.removeItem('rd:auto-backup-full'); }catch(e){}
+    await fetch(DRIVE_BACKUP_URL, {method: 'POST', mode: 'no-cors', body: jsonStr});
+    console.log('✅ Drive Backup v5 Success - ' + (jsonStr.length/1024/1024).toFixed(2) + ' MB, ' + Object.keys(allData).length + ' items at ' + new Date().toLocaleTimeString());
+    const el = document.getElementById('backupStatus');
+    if(el) el.textContent = '✅ Backed up ' + (jsonStr.length/1024).toFixed(2) + ' MB';
   }catch(e){ console.log('Backup error', e); }
 }
 
-window.addEventListener('load',()=>{ setTimeout(autoRestoreFromDrive, 1500); });
-window.addEventListener('beforeunload',()=>{ autoBackupToDrive(); });
-setInterval(autoBackupToDrive, 3*60*1000); // Every 3 minutes
+try{ localStorage.removeItem('rd:auto-backup-full'); }catch(e){}
 
-// Manual functions for console
-window.manualBackup = autoBackupToDrive;
-window.manualRestore = autoRestoreFromDrive;
+window.addEventListener('load',()=>{ setTimeout(autoRestoreFromDrive, 2500); });
+window.addEventListener('beforeunload',()=>{ autoBackupToDrive(); });
+window.addEventListener('pagehide',()=>{ autoBackupToDrive(); });
+setInterval(autoBackupToDrive, 3*60*1000);
+
 window.backupToDrive = autoBackupToDrive;
+window.restoreFromDrive = autoRestoreFromDrive;
+window.manualBackup = autoBackupToDrive;
+window.clearQuota = function(){ localStorage.removeItem('rd:auto-backup-full'); alert('Quota cleaned!'); location.reload(); };
 </script>
-<!-- END GOOGLE DRIVE AUTO BACKUP v2 -->
+<!-- END GOOGLE DRIVE AUTO BACKUP v5 FINAL -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
