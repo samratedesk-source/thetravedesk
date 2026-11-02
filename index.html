@@ -1,63 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- SILENT PROTECTION - No Popups, Auto Backup Only -->
-<script>
-(function() {
-  // 1. Disable Right Click (Silent, no popup)
-  function blockContextMenu(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    return false;
-  }
-  document.addEventListener('contextmenu', blockContextMenu, true);
-  document.documentElement.addEventListener('contextmenu', blockContextMenu, true);
-  window.addEventListener('contextmenu', blockContextMenu, true);
-  
-  function blockRightMouseDown(e) {
-    if (e.button === 2 || e.which === 3) {
-      e.preventDefault();
-      e.stopPropagation();
-      return false;
-    }
-  }
-  document.addEventListener('mousedown', blockRightMouseDown, true);
-  document.addEventListener('mouseup', blockRightMouseDown, true);
-
-  // 2. Disable F5/Ctrl+R but with silent backup, no annoying double popup
-  // We keep F5 blocked but auto backup silently
-  function handleRefreshKeys(e) {
-    const isF5 = e.key === 'F5' || e.keyCode === 116;
-    const isCtrlR = (e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R' || e.keyCode === 82);
-    
-    if (isF5 || isCtrlR) {
-      // For F5/Ctrl+R, we do silent backup and allow reload
-      // No confirmation - just backup
-      try { if (typeof autoBackupToDrive === 'function') autoBackupToDrive(); } catch(err) {}
-      // Don't prevent - allow reload after backup
-      console.log('🔄 Refresh detected, auto backup done');
-    }
-  }
-  document.addEventListener('keydown', handleRefreshKeys, true);
-
-  // 3. BeforeUnload - SILENT AUTO BACKUP, No Confirmation Popup
-  // This removes the annoying "Reload site? Changes may not be saved" popup
-  // But still does auto backup
-  window.addEventListener('beforeunload', function(e) {
-    try { if (typeof autoBackupToDrive === 'function') autoBackupToDrive(); } catch(err) {}
-    // No return value = No popup, silent backup
-  });
-
-  console.log('🛡️ Silent Protection: Right Click Blocked, Auto Backup on Close (No Popups)');
-})();
-</script>
-<!-- END SILENT PROTECTION -->
-
-<!-- GOOGLE DRIVE AUTO BACKUP v8 SILENT - No Popups -->
+<!-- MOBILE FIX + MANUAL RESTORE BUTTON + DRIVE BACKUP v9 -->
 <script>
 const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
-console.log('☁️ Drive Backup v8 SILENT - No Popups, Auto Only');
+console.log('☁️ Drive Backup v9 MOBILE FIX');
 
 function jsonpLoad(url, callback) {
   const cbName = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
@@ -67,7 +14,7 @@ function jsonpLoad(url, callback) {
     callback(data);
   };
   const script = document.createElement('script');
-  script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cbName;
+  script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cbName + '&t=' + Date.now(); // Cache bust
   script.onerror = function() {
     try { delete window[cbName]; } catch(e){}
     try { document.body.removeChild(script); } catch(e){}
@@ -76,47 +23,45 @@ function jsonpLoad(url, callback) {
   document.body.appendChild(script);
 }
 
-async function autoRestoreFromDrive(){
+async function autoRestoreFromDrive(showAlert=true){
   return new Promise((resolve) => {
     try{
-      console.log('🔄 Checking Drive backup...');
+      console.log('🔄 Mobile Restore from Drive...');
+      const statusEl = document.getElementById('mobileRestoreStatus');
+      if(statusEl) statusEl.textContent = '🔄 Restoring from Drive...';
+      
       jsonpLoad(DRIVE_BACKUP_URL + '?action=load', function(backup) {
-        if(!backup || backup.error){ console.log('No Drive backup yet'); resolve(); return; }
-        // Check if backup is newer than current data?
+        if(!backup || backup.error){ 
+          console.log('No Drive backup:', backup?.error); 
+          if(statusEl) statusEl.textContent = '❌ No backup found in Drive';
+          if(showAlert) alert('❌ No backup found in Drive yet!');
+          resolve(false); 
+          return; 
+        }
         let restored=0;
-        let hasNewData = false;
         Object.keys(backup).forEach(k=>{
           if(k==='_backupMeta') return;
           if(k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup')) return;
-          const existing = localStorage.getItem(k);
-          if(!existing) hasNewData = true;
           try{ 
             const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k]; 
-            if(existing !== v) {
-              localStorage.setItem(k,v); 
-              restored++; 
-            }
+            localStorage.setItem(k,v); 
+            restored++; 
           }catch(e){}
         });
-        if(restored>0 && hasNewData){
-          console.log(`✅ SILENT Restored ${restored} new items from Drive - No reload needed, data merged`);
-          // SILENT - No confirm popup, just log
-          // Optionally show a small toast notification
-          try{
-            const toast = document.createElement('div');
-            toast.textContent = `✅ Restored ${restored} items from Drive`;
-            toast.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#065f46;color:white;padding:12px 18px;border-radius:8px;font-size:13px;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
-            document.body.appendChild(toast);
-            setTimeout(()=>{ try{ document.body.removeChild(toast); }catch(e){} }, 3000);
-          }catch(e){}
-        } else if(restored>0){
-          console.log(`ℹ️ Drive backup checked, ${restored} items same as current`);
-        } else {
-          console.log('ℹ️ Drive backup same as current, no restore needed');
+        console.log(`✅ Restored ${restored} items`);
+        if(statusEl) statusEl.textContent = `✅ Restored ${restored} items! Reloading...`;
+        
+        if(restored>0){
+          const t = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
+          // For mobile, auto reload after 1 sec, no confirm popup
+          if(showAlert){
+            alert(`✅ Restored ${restored} items from Drive (${t})! Page will reload now.`);
+          }
+          setTimeout(()=> location.reload(), 1000);
         }
-        resolve();
+        resolve(true);
       });
-    }catch(e){ resolve(); }
+    }catch(e){ console.log('Restore error', e); resolve(false); }
   });
 }
 
@@ -133,18 +78,47 @@ async function autoBackupToDrive(){
     const s=JSON.stringify(allData);
     try{ localStorage.removeItem('rd:auto-backup-full'); }catch(e){}
     await fetch(DRIVE_BACKUP_URL, {method:'POST', mode:'no-cors', body:s});
-    console.log('✅ Silent Backup ' + (s.length/1024/1024).toFixed(2) + ' MB at ' + new Date().toLocaleTimeString());
-  }catch(e){}
+    console.log('✅ Backup ' + (s.length/1024/1024).toFixed(2) + ' MB');
+    const statusEl = document.getElementById('mobileRestoreStatus');
+    if(statusEl) statusEl.textContent = '✅ Backed up ' + (s.length/1024).toFixed(2) + ' MB at ' + new Date().toLocaleTimeString();
+    return true;
+  }catch(e){ console.log('Backup error', e); return false; }
 }
 
+// Silent Protection - Right Click Block
+(function() {
+  function blockContextMenu(e) { e.preventDefault(); e.stopPropagation(); return false; }
+  document.addEventListener('contextmenu', blockContextMenu, true);
+  document.documentElement.addEventListener('contextmenu', blockContextMenu, true);
+  console.log('🛡️ Mobile Protection Enabled');
+})();
+
 try{ localStorage.removeItem('rd:auto-backup-full'); }catch(e){}
-window.addEventListener('load',()=>{ setTimeout(autoRestoreFromDrive, 2000); });
+window.addEventListener('load',()=>{ setTimeout(()=> autoRestoreFromDrive(false), 3000); });
 window.addEventListener('pagehide',()=>{ autoBackupToDrive(); });
 setInterval(autoBackupToDrive, 3*60*1000);
+
 window.backupToDrive = autoBackupToDrive;
 window.restoreFromDrive = autoRestoreFromDrive;
+window.manualRestore = function(){ autoRestoreFromDrive(true); };
+window.manualBackup = autoBackupToDrive;
 </script>
-<!-- END DRIVE BACKUP v8 SILENT -->
+
+<!-- MOBILE RESTORE BUTTON - Visible on all devices, extra helpful for mobile -->
+<div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:2px solid #065f46;border-radius:12px;padding:10px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:6px;font-family:system-ui,sans-serif;">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-weight:bold;font-size:13px;color:#065f46;">☁️ Drive Backup</span>
+    <span id="mobileRestoreStatus" style="font-size:11px;color:#666;">Ready</span>
+    <button onclick="document.getElementById('mobileRestorePanel').style.display='none'" style="background:#eee;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;">✕</button>
+  </div>
+  <div style="display:flex;gap:6px;">
+    <button onclick="manualRestore()" style="flex:1;background:#065f46;color:white;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🔄 RESTORE FROM DRIVE</button>
+    <button onclick="backupToDrive(); document.getElementById('mobileRestoreStatus').textContent='✅ Backup triggered!';" style="flex:1;background:#f59e0b;color:white;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">☁️ BACKUP NOW</button>
+  </div>
+  <div style="font-size:10px;color:#999;text-align:center;">Mobile-ൽ Data കാണുന്നില്ലെങ്കിൽ RESTORE FROM DRIVE Click ചെയ്യുക</div>
+</div>
+
+<!-- END MOBILE FIX v9 -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
