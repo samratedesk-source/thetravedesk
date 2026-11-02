@@ -1,67 +1,49 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- MOBILE FIX + MANUAL RESTORE BUTTON + DRIVE BACKUP v9 -->
+<!-- GOOGLE DRIVE AUTO BACKUP v3 - CORS Fixed with JSONP - 100% Free -->
 <script>
-const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
-console.log('☁️ Drive Backup v9 MOBILE FIX');
+const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbxwyPbo6Vjot3_6qQBsYLNUDU6aqsExIDm2akrd9BBTYZJKkoNZ0kInQYzRNkkiPFMO/exec';
+console.log('☁️ Travel Desk Drive Backup v3 - CORS Fixed');
 
 function jsonpLoad(url, callback) {
-  const cbName = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
-  window[cbName] = function(data) {
-    try { delete window[cbName]; } catch(e){}
-    try { document.body.removeChild(script); } catch(e){}
+  const callbackName = 'jsonp_callback_' + Math.round(100000 * Math.random());
+  window[callbackName] = function(data) {
+    delete window[callbackName];
+    document.body.removeChild(script);
     callback(data);
   };
   const script = document.createElement('script');
-  script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cbName + '&t=' + Date.now(); // Cache bust
+  script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + callbackName;
   script.onerror = function() {
-    try { delete window[cbName]; } catch(e){}
-    try { document.body.removeChild(script); } catch(e){}
-    callback({error: 'fail'});
+    console.log('JSONP load failed');
+    delete window[callbackName];
+    document.body.removeChild(script);
+    callback({error: 'JSONP failed'});
   };
   document.body.appendChild(script);
 }
 
-async function autoRestoreFromDrive(showAlert=true){
+async function autoRestoreFromDrive(){
   return new Promise((resolve) => {
     try{
-      console.log('🔄 Mobile Restore from Drive...');
-      const statusEl = document.getElementById('mobileRestoreStatus');
-      if(statusEl) statusEl.textContent = '🔄 Restoring from Drive...';
-      
+      console.log('🔄 Restoring from Drive via JSONP...');
       jsonpLoad(DRIVE_BACKUP_URL + '?action=load', function(backup) {
-        if(!backup || backup.error){ 
-          console.log('No Drive backup:', backup?.error); 
-          if(statusEl) statusEl.textContent = '❌ No backup found in Drive';
-          if(showAlert) alert('❌ No backup found in Drive yet!');
-          resolve(false); 
-          return; 
-        }
-        let restored=0;
+        if(backup.error){ console.log('No backup yet:', backup.error); resolve(); return; }
+        let count=0;
         Object.keys(backup).forEach(k=>{
           if(k==='_backupMeta') return;
-          if(k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup')) return;
-          try{ 
-            const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k]; 
-            localStorage.setItem(k,v); 
-            restored++; 
-          }catch(e){}
+          const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k];
+          try{ localStorage.setItem(k,v); count++; }catch(e){ console.log('Quota exceeded for', k); }
         });
-        console.log(`✅ Restored ${restored} items`);
-        if(statusEl) statusEl.textContent = `✅ Restored ${restored} items! Reloading...`;
-        
-        if(restored>0){
-          const t = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
-          // For mobile, auto reload after 1 sec, no confirm popup
-          if(showAlert){
-            alert(`✅ Restored ${restored} items from Drive (${t})! Page will reload now.`);
-          }
-          setTimeout(()=> location.reload(), 1000);
+        if(count>0){
+          console.log(`✅ Restored ${count} items from Drive`);
+          const time = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
+          setTimeout(()=>{ if(confirm(`✅ Auto Restored ${count} items from Drive backup (${time}). Reload page to see restored data?`)) location.reload(); }, 800);
         }
-        resolve(true);
+        resolve();
       });
-    }catch(e){ console.log('Restore error', e); resolve(false); }
+    }catch(e){ console.log('Restore error', e); resolve(); }
   });
 }
 
@@ -70,55 +52,32 @@ async function autoBackupToDrive(){
     const allData={};
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
-      if(!k || k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup')) continue;
-      try{ const v=localStorage.getItem(k); try{ allData[k]=JSON.parse(v); }catch{ allData[k]=v; } }catch(e){}
+      if(k){ try{ allData[k]=JSON.parse(localStorage.getItem(k)); }catch{ allData[k]=localStorage.getItem(k); } }
     }
     if(Object.keys(allData).length===0) return;
     allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length};
-    const s=JSON.stringify(allData);
-    try{ localStorage.removeItem('rd:auto-backup-full'); }catch(e){}
-    await fetch(DRIVE_BACKUP_URL, {method:'POST', mode:'no-cors', body:s});
-    console.log('✅ Backup ' + (s.length/1024/1024).toFixed(2) + ' MB');
-    const statusEl = document.getElementById('mobileRestoreStatus');
-    if(statusEl) statusEl.textContent = '✅ Backed up ' + (s.length/1024).toFixed(2) + ' MB at ' + new Date().toLocaleTimeString();
-    return true;
-  }catch(e){ console.log('Backup error', e); return false; }
+    const jsonStr = JSON.stringify(allData);
+    
+    // POST with no-cors (works for save, even if we can't read response)
+    await fetch(DRIVE_BACKUP_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      body: jsonStr
+    });
+    console.log('✅ Auto Backup to Drive - Size: ' + (jsonStr.length/1024/1024).toFixed(2) + ' MB at ' + new Date().toLocaleTimeString());
+  }catch(e){ console.log('Backup error', e); }
 }
 
-// Silent Protection - Right Click Block
-(function() {
-  function blockContextMenu(e) { e.preventDefault(); e.stopPropagation(); return false; }
-  document.addEventListener('contextmenu', blockContextMenu, true);
-  document.documentElement.addEventListener('contextmenu', blockContextMenu, true);
-  console.log('🛡️ Mobile Protection Enabled');
-})();
-
-try{ localStorage.removeItem('rd:auto-backup-full'); }catch(e){}
-window.addEventListener('load',()=>{ setTimeout(()=> autoRestoreFromDrive(false), 3000); });
+window.addEventListener('load',()=>{ setTimeout(autoRestoreFromDrive, 2000); });
+window.addEventListener('beforeunload',()=>{ autoBackupToDrive(); });
 window.addEventListener('pagehide',()=>{ autoBackupToDrive(); });
 setInterval(autoBackupToDrive, 3*60*1000);
-
+window.manualBackup = autoBackupToDrive;
+window.manualRestore = autoRestoreFromDrive;
 window.backupToDrive = autoBackupToDrive;
 window.restoreFromDrive = autoRestoreFromDrive;
-window.manualRestore = function(){ autoRestoreFromDrive(true); };
-window.manualBackup = autoBackupToDrive;
 </script>
-
-<!-- MOBILE RESTORE BUTTON - Visible on all devices, extra helpful for mobile -->
-<div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:2px solid #065f46;border-radius:12px;padding:10px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:6px;font-family:system-ui,sans-serif;">
-  <div style="display:flex;justify-content:space-between;align-items:center;">
-    <span style="font-weight:bold;font-size:13px;color:#065f46;">☁️ Drive Backup</span>
-    <span id="mobileRestoreStatus" style="font-size:11px;color:#666;">Ready</span>
-    <button onclick="document.getElementById('mobileRestorePanel').style.display='none'" style="background:#eee;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;">✕</button>
-  </div>
-  <div style="display:flex;gap:6px;">
-    <button onclick="manualRestore()" style="flex:1;background:#065f46;color:white;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🔄 RESTORE FROM DRIVE</button>
-    <button onclick="backupToDrive(); document.getElementById('mobileRestoreStatus').textContent='✅ Backup triggered!';" style="flex:1;background:#f59e0b;color:white;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">☁️ BACKUP NOW</button>
-  </div>
-  <div style="font-size:10px;color:#999;text-align:center;">Mobile-ൽ Data കാണുന്നില്ലെങ്കിൽ RESTORE FROM DRIVE Click ചെയ്യുക</div>
-</div>
-
-<!-- END MOBILE FIX v9 -->
+<!-- END GOOGLE DRIVE AUTO BACKUP v3 -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
