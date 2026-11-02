@@ -1,91 +1,116 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- PAGE PROTECTION - Disable Right Click & Accidental Refresh -->
+<!-- STRONG PAGE PROTECTION - Disable Right Click & Refresh Completely -->
 <script>
-// 1. Disable Right Click
-document.addEventListener('contextmenu', function(e) {
-  e.preventDefault();
-  console.log('🚫 Right click disabled to prevent accidental data loss');
-  return false;
-});
-
-// 2. Disable Refresh Shortcuts (F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5)
-document.addEventListener('keydown', function(e) {
-  // F5
-  if (e.key === 'F5' || e.keyCode === 116) {
+(function() {
+  // Disable right click - multiple methods, capture phase
+  function blockContextMenu(e) {
     e.preventDefault();
-    if (confirm('⚠️ Refresh ചെയ്യാൻ ശ്രമിക്കുന്നു! Data Backup ചെയ്യണോ?\n\nOK = Backup & Refresh\nCancel = Stay')) {
-      autoBackupToDrive();
-      setTimeout(() => location.reload(), 500);
-    }
+    e.stopPropagation();
+    e.stopImmediatePropagation();
     return false;
   }
-  // Ctrl+R, Ctrl+Shift+R, Ctrl+F5
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R' || e.key === 'F5')) {
-    e.preventDefault();
-    if (confirm('⚠️ Page Refresh Blocked! Data Loss തടയാൻ Refresh Disable ചെയ്തിരിക്കുന്നു!\n\nBackup ചെയ്ത് Refresh ചെയ്യണോ?')) {
-      autoBackupToDrive();
-      setTimeout(() => location.reload(), 500);
-    }
-    return false;
-  }
-  // Ctrl+W (Close tab), Alt+F4 handled by beforeunload
-});
-
-// 3. BeforeUnload Confirmation + Auto Backup (Most Important!)
-let isDirty = false;
-// Mark dirty when localStorage changes
-const originalSetItem = localStorage.setItem;
-localStorage.setItem = function(key, value) {
-  isDirty = true;
-  originalSetItem.apply(this, arguments);
-};
-
-window.addEventListener('beforeunload', function(e) {
-  // Always backup before leaving
-  autoBackupToDrive();
   
-  // Show confirmation if there are unsaved changes
-  if (isDirty) {
-    const message = '⚠️ നിങ്ങൾ Page Leave ചെയ്യാൻ പോകുന്നു! Data Auto Backup ആകും, പക്ഷെ ഉറപ്പാക്കണോ?';
-    e.preventDefault();
-    e.returnValue = message;
-    return message;
-  }
-});
-
-// 4. Disable Pull-to-Refresh on Mobile (extra)
-let lastTouchY = 0;
-document.addEventListener('touchstart', function(e) {
-  lastTouchY = e.touches[0].clientY;
-}, {passive: false});
-document.addEventListener('touchmove', function(e) {
-  const touchY = e.touches[0].clientY;
-  const touchDiff = touchY - lastTouchY;
-  // If at top of page and pulling down, prevent refresh
-  if (window.scrollY === 0 && touchDiff > 0) {
-    // Allow only if not at top or not pulling
-    if (touchDiff > 10) {
+  // Block on all possible targets with capture
+  document.addEventListener('contextmenu', blockContextMenu, true);
+  document.documentElement.addEventListener('contextmenu', blockContextMenu, true);
+  window.addEventListener('contextmenu', blockContextMenu, true);
+  document.body && document.body.addEventListener('contextmenu', blockContextMenu, true);
+  
+  // Also block mousedown with right button (button 2)
+  function blockRightMouseDown(e) {
+    if (e.button === 2 || e.which === 3) {
       e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      return false;
     }
   }
-  lastTouchY = touchY;
-}, {passive: false});
+  document.addEventListener('mousedown', blockRightMouseDown, true);
+  document.addEventListener('mouseup', blockRightMouseDown, true);
+  
+  // Disable text selection context menu on long press (mobile)
+  document.addEventListener('selectstart', function(e) {
+    // Allow selection inside inputs
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    // e.preventDefault(); // Commented to allow normal selection, but no right click
+  });
+  
+  // Disable Refresh Keys - F5, Ctrl+R, etc
+  function blockRefreshKeys(e) {
+    const isF5 = e.key === 'F5' || e.keyCode === 116;
+    const isCtrlR = (e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R' || e.keyCode === 82);
+    const isCtrlShiftR = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'R' || e.keyCode === 82);
+    
+    if (isF5 || isCtrlR || isCtrlShiftR) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      if (confirm('⚠️ Refresh ചെയ്യാൻ ശ്രമിക്കുന്നു! Data Backup ചെയ്യണോ?\n\nOK = Backup & Refresh\nCancel = Stay')) {
+        if (typeof autoBackupToDrive === 'function') autoBackupToDrive();
+        setTimeout(() => location.reload(), 600);
+      }
+      return false;
+    }
+  }
+  
+  document.addEventListener('keydown', blockRefreshKeys, true);
+  window.addEventListener('keydown', blockRefreshKeys, true);
+  
+  // Before unload - auto backup + confirmation
+  let isDirty = false;
+  try {
+    const origSetItem = localStorage.setItem;
+    localStorage.setItem = function(k,v) {
+      isDirty = true;
+      return origSetItem.apply(this, arguments);
+    };
+  } catch(e) {}
+  
+  window.addEventListener('beforeunload', function(e) {
+    try { if (typeof autoBackupToDrive === 'function') autoBackupToDrive(); } catch(err) {}
+    if (isDirty) {
+      e.preventDefault();
+      e.returnValue = '⚠️ Page Leave ചെയ്യുന്നു! Backup ചെയ്തു.';
+      return e.returnValue;
+    }
+  });
+  
+  // Override window.reload and location.reload to add confirmation
+  try {
+    const origReload = window.location.reload;
+    // Can't override location.reload in all browsers, but we try
+  } catch(e) {}
+  
+  console.log('🛡️ STRONG Protection Enabled: Right Click BLOCKED, Refresh Protected');
+})();
 
-console.log('🛡️ Page Protection Enabled: Right Click Disabled, Refresh Protected, Auto Backup on Close');
+// Extra CSS to disable selection context menu on mobile
+document.addEventListener('DOMContentLoaded', function() {
+  const style = document.createElement('style');
+  style.textContent = `
+    * {
+      -webkit-touch-callout: none !important;
+    }
+    input, textarea {
+      -webkit-touch-callout: default !important;
+    }
+  `;
+  document.head.appendChild(style);
+});
 </script>
-<!-- END PAGE PROTECTION -->
+<!-- END STRONG PAGE PROTECTION -->
 
-<!-- GOOGLE DRIVE AUTO BACKUP v6 FINAL - With Protection -->
+<!-- GOOGLE DRIVE AUTO BACKUP v7 FINAL - Protected -->
 <script>
 const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
-console.log('☁️ Travel Desk Drive Backup v6 FINAL - With Protection');
+console.log('☁️ Drive Backup v7 FINAL');
 
 function jsonpLoad(url, callback) {
   const cbName = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
   window[cbName] = function(data) {
-    try { delete window[cbName]; } catch(e){ window[cbName]=undefined; }
+    try { delete window[cbName]; } catch(e){}
     try { document.body.removeChild(script); } catch(e){}
     callback(data);
   };
@@ -94,7 +119,7 @@ function jsonpLoad(url, callback) {
   script.onerror = function() {
     try { delete window[cbName]; } catch(e){}
     try { document.body.removeChild(script); } catch(e){}
-    callback({error: 'JSONP failed'});
+    callback({error: 'fail'});
   };
   document.body.appendChild(script);
 }
@@ -102,44 +127,36 @@ function jsonpLoad(url, callback) {
 async function autoRestoreFromDrive(){
   return new Promise((resolve) => {
     try{
-      console.log('🔄 Restoring from Drive v6...');
       jsonpLoad(DRIVE_BACKUP_URL + '?action=load', function(backup) {
-        if(!backup || backup.error){ console.log('No Drive backup yet:', backup?.error); resolve(); return; }
-        let restored=0;
+        if(!backup || backup.error){ resolve(); return; }
+        let r=0;
         Object.keys(backup).forEach(k=>{
           if(k==='_backupMeta') return;
           if(k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup')) return;
-          try{ const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k]; localStorage.setItem(k,v); restored++; }catch(e){}
+          try{ const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k]; localStorage.setItem(k,v); r++; }catch(e){}
         });
-        if(restored>0){
-          console.log(`✅ Restored ${restored} items from Drive`);
-          const t = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
-          setTimeout(()=>{ if(confirm(`✅ Restored ${restored} items from Drive (${t}). Reload?`)) location.reload(); }, 800);
-        }
+        if(r>0){ console.log(`✅ Restored ${r} items`); const t = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent'; setTimeout(()=>{ if(confirm(`✅ Restored ${r} items from Drive (${t}). Reload?`)) location.reload(); }, 800); }
         resolve();
       });
-    }catch(e){ console.log('Restore error', e); resolve(); }
+    }catch(e){ resolve(); }
   });
 }
 
 async function autoBackupToDrive(){
   try{
     const allData={};
-    let totalSize=0;
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
-      if(!k) continue;
-      if(k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup')) continue;
-      try{ const val = localStorage.getItem(k); totalSize += val ? val.length : 0; try{ allData[k]=JSON.parse(val); }catch{ allData[k]=val; } }catch(e){}
+      if(!k || k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup')) continue;
+      try{ const v=localStorage.getItem(k); try{ allData[k]=JSON.parse(v); }catch{ allData[k]=v; } }catch(e){}
     }
     if(Object.keys(allData).length===0) return;
-    allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length, sizeKB: Math.round(totalSize/1024)};
-    const jsonStr = JSON.stringify(allData);
+    allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length};
+    const s=JSON.stringify(allData);
     try{ localStorage.removeItem('rd:auto-backup-full'); }catch(e){}
-    await fetch(DRIVE_BACKUP_URL, {method: 'POST', mode: 'no-cors', body: jsonStr});
-    console.log('✅ Drive Backup v6 - ' + (jsonStr.length/1024/1024).toFixed(2) + ' MB at ' + new Date().toLocaleTimeString());
-    isDirty = false;
-  }catch(e){ console.log('Backup error', e); }
+    await fetch(DRIVE_BACKUP_URL, {method:'POST', mode:'no-cors', body:s});
+    console.log('✅ Backup ' + (s.length/1024/1024).toFixed(2) + ' MB');
+  }catch(e){}
 }
 
 try{ localStorage.removeItem('rd:auto-backup-full'); }catch(e){}
@@ -148,10 +165,9 @@ window.addEventListener('pagehide',()=>{ autoBackupToDrive(); });
 setInterval(autoBackupToDrive, 3*60*1000);
 window.backupToDrive = autoBackupToDrive;
 window.restoreFromDrive = autoRestoreFromDrive;
-window.manualBackup = autoBackupToDrive;
-window.clearQuota = function(){ localStorage.removeItem('rd:auto-backup-full'); alert('Quota cleaned!'); location.reload(); };
+window.clearQuota = function(){ localStorage.removeItem('rd:auto-backup-full'); alert('Cleaned!'); location.reload(); };
 </script>
-<!-- END GOOGLE DRIVE AUTO BACKUP v6 FINAL -->
+<!-- END DRIVE BACKUP v7 -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
