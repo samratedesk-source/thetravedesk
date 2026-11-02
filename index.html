@@ -1,49 +1,116 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- GOOGLE DRIVE AUTO BACKUP v3 - CORS Fixed with JSONP - 100% Free -->
+<!-- CRM FIX v11 - IMMEDIATE BLOCK of Internal Auto-Sync & Quota Fix -->
 <script>
-const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbxwyPbo6Vjot3_6qQBsYLNUDU6aqsExIDm2akrd9BBTYZJKkoNZ0kInQYzRNkkiPFMO/exec';
-console.log('☁️ Travel Desk Drive Backup v3 - CORS Fixed');
+// IMMEDIATE BLOCK - Before any other script loads
+(function() {
+  console.log('🔧 v11: Immediately blocking internal auto-backup to fix quota');
 
-function jsonpLoad(url, callback) {
-  const callbackName = 'jsonp_callback_' + Math.round(100000 * Math.random());
-  window[callbackName] = function(data) {
-    delete window[callbackName];
-    document.body.removeChild(script);
-    callback(data);
+  // Blocked keys
+  const BLOCKED = ['rd:auto-backup-full', 'rd:auto-sync-backup', 'rd:auto-backup', 'rd:full-backup', 'rd:quotes-local-backup'];
+
+  // Override localStorage.setItem IMMEDIATELY
+  const _origSetItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function(key, value) {
+    for (let b of BLOCKED) {
+      if (key === b || key.startsWith(b) || key.includes('auto-sync') || key.includes('auto-backup-full')) {
+        console.log('🚫 BLOCKED internal backup:', key, '(' + (value.length/1024).toFixed(1) + ' KB) - Using Drive backup');
+        return;
+      }
+    }
+    try {
+      return _origSetItem.call(this, key, value);
+    } catch (e) {
+      if (e.name === 'QuotaExceededError' || e.code === 22 || e.message.includes('quota')) {
+        console.log('⚠️ Quota exceeded for', key, '- Cleaning blocked keys');
+        BLOCKED.forEach(k => {
+          try {
+            for (let i=localStorage.length-1; i>=0; i--) {
+              const kk = localStorage.key(i);
+              if (kk && (kk===k || kk.startsWith(k) || kk.includes('auto-sync') || kk.includes('auto-backup-full'))) {
+                console.log('🧹 Removing', kk);
+                _origSetItem.call(localStorage, '__temp__', ''); // Trigger to check
+                localStorage.removeItem(kk);
+              }
+            }
+          } catch(err){}
+        });
+        // Retry for non-blocked keys
+        if (!BLOCKED.some(b => key===b || key.startsWith(b) || key.includes('auto-sync') || key.includes('auto-backup-full'))) {
+          try { return _origSetItem.call(this, key, value); } catch(err){}
+        }
+      }
+    }
   };
-  const script = document.createElement('script');
-  script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + callbackName;
-  script.onerror = function() {
-    console.log('JSONP load failed');
-    delete window[callbackName];
-    document.body.removeChild(script);
-    callback({error: 'JSONP failed'});
+
+  // Immediately define no-op functions to prevent internal auto-sync
+  window.writeFullAutoBackup = function() { console.log('🚫 writeFullAutoBackup DISABLED - Using Drive backup'); };
+  window.autoSyncToGoogleDriveFolder = function() { console.log('🚫 autoSyncToGoogleDriveFolder DISABLED - Using Drive backup'); };
+  window.startAutoSync = function() { console.log('🚫 startAutoSync DISABLED - Using Drive backup'); };
+  window.startAutoSyncWithFolder = function() { console.log('🚫 startAutoSyncWithFolder DISABLED'); };
+  window.loadAll = (function(orig) {
+    return function() {
+      // Clean before loadAll
+      BLOCKED.forEach(k => {
+        try {
+          for (let i=localStorage.length-1; i>=0; i--) {
+            const kk = localStorage.key(i);
+            if (kk && (kk===k || kk.startsWith(k) || kk.includes('auto-sync') || kk.includes('auto-backup'))) {
+              localStorage.removeItem(kk);
+            }
+          }
+        } catch(e){}
+      });
+      console.log('✅ Cleaned old backups before load');
+      if (orig) return orig.apply(this, arguments);
+    };
+  })(window.loadAll);
+
+  console.log('✅ v11 Quota fix installed - Internal auto-backup blocked');
+})();
+</script>
+
+<script>
+// Protection - Right Click Block
+(function() {
+  function blockCM(e) { e.preventDefault(); e.stopPropagation(); return false; }
+  document.addEventListener('contextmenu', blockCM, true);
+  document.documentElement.addEventListener('contextmenu', blockCM, true);
+})();
+
+// Drive Backup v11
+const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
+console.log('☁️ Drive Backup v11');
+
+function jsonpLoad(url, cb) {
+  const name = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
+  window[name] = function(data) {
+    try { delete window[name]; } catch(e){}
+    try { document.body.removeChild(s); } catch(e){}
+    cb(data);
   };
-  document.body.appendChild(script);
+  const s = document.createElement('script');
+  s.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + name + '&t=' + Date.now();
+  s.onerror = function() { try { delete window[name]; } catch(e){} try { document.body.removeChild(s); } catch(e){} cb({error:'fail'}); };
+  document.body.appendChild(s);
 }
 
-async function autoRestoreFromDrive(){
+async function autoRestoreFromDrive(showAlert=false){
   return new Promise((resolve) => {
     try{
-      console.log('🔄 Restoring from Drive via JSONP...');
       jsonpLoad(DRIVE_BACKUP_URL + '?action=load', function(backup) {
-        if(backup.error){ console.log('No backup yet:', backup.error); resolve(); return; }
-        let count=0;
+        if(!backup || backup.error){ resolve(false); return; }
+        let r=0;
         Object.keys(backup).forEach(k=>{
-          if(k==='_backupMeta') return;
-          const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k];
-          try{ localStorage.setItem(k,v); count++; }catch(e){ console.log('Quota exceeded for', k); }
+          if(k==='_backupMeta' || k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup') || k.startsWith('rd:auto-sync') || k.includes('local-backup')) return;
+          try{ const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k]; Storage.prototype.setItem.call(localStorage, k, v); r++; }catch(e){}
         });
-        if(count>0){
-          console.log(`✅ Restored ${count} items from Drive`);
-          const time = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
-          setTimeout(()=>{ if(confirm(`✅ Auto Restored ${count} items from Drive backup (${time}). Reload page to see restored data?`)) location.reload(); }, 800);
-        }
-        resolve();
+        console.log(`✅ Drive Restore v11: ${r} items`);
+        if(r>0 && showAlert) { alert(`✅ Restored ${r} items!`); setTimeout(()=>location.reload(),800); }
+        resolve(r>0);
       });
-    }catch(e){ console.log('Restore error', e); resolve(); }
+    }catch(e){ resolve(false); }
   });
 }
 
@@ -52,32 +119,46 @@ async function autoBackupToDrive(){
     const allData={};
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
-      if(k){ try{ allData[k]=JSON.parse(localStorage.getItem(k)); }catch{ allData[k]=localStorage.getItem(k); } }
+      if(!k || k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup') || k.startsWith('rd:auto-sync') || k.includes('local-backup')) continue;
+      try{ const v=localStorage.getItem(k); try{ allData[k]=JSON.parse(v); }catch{ allData[k]=v; } }catch(e){}
     }
-    if(Object.keys(allData).length===0) return;
+    if(Object.keys(allData).length===0) return false;
     allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length};
-    const jsonStr = JSON.stringify(allData);
-    
-    // POST with no-cors (works for save, even if we can't read response)
-    await fetch(DRIVE_BACKUP_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      body: jsonStr
-    });
-    console.log('✅ Auto Backup to Drive - Size: ' + (jsonStr.length/1024/1024).toFixed(2) + ' MB at ' + new Date().toLocaleTimeString());
-  }catch(e){ console.log('Backup error', e); }
+    const s=JSON.stringify(allData);
+    await fetch(DRIVE_BACKUP_URL, {method:'POST', mode:'no-cors', body:s});
+    console.log('✅ Drive Backup v11 - ' + (s.length/1024/1024).toFixed(2) + ' MB');
+    return true;
+  }catch(e){ return false; }
 }
 
-window.addEventListener('load',()=>{ setTimeout(autoRestoreFromDrive, 2000); });
-window.addEventListener('beforeunload',()=>{ autoBackupToDrive(); });
+window.addEventListener('load',()=>{ setTimeout(()=> autoRestoreFromDrive(false), 2000); });
 window.addEventListener('pagehide',()=>{ autoBackupToDrive(); });
+window.addEventListener('beforeunload',()=>{ autoBackupToDrive(); });
 setInterval(autoBackupToDrive, 3*60*1000);
-window.manualBackup = autoBackupToDrive;
-window.manualRestore = autoRestoreFromDrive;
 window.backupToDrive = autoBackupToDrive;
-window.restoreFromDrive = autoRestoreFromDrive;
+window.restoreFromDrive = ()=> autoRestoreFromDrive(true);
+window.clearQuota = function(){ 
+  ['rd:auto-backup-full','rd:auto-sync-backup','rd:auto-backup'].forEach(k=>{ 
+    try{ for(let i=localStorage.length-1;i>=0;i--){ const kk=localStorage.key(i); if(kk && (kk===k || kk.startsWith(k) || kk.includes('auto-sync') || kk.includes('auto-backup'))) localStorage.removeItem(kk); } }catch(e){}
+  });
+  alert('✅ Cleaned! Reloading...'); location.reload();
+};
 </script>
-<!-- END GOOGLE DRIVE AUTO BACKUP v3 -->
+
+<div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:2px solid #065f46;border-radius:12px;padding:10px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:6px;font-family:system-ui,sans-serif;">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-weight:bold;font-size:13px;color:#065f46;">☁️ Drive Backup v11</span>
+    <span style="font-size:11px;color:#065f46;">✅ Quota Fixed</span>
+    <button onclick="document.getElementById('mobileRestorePanel').style.display='none'" style="background:#eee;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;">✕</button>
+  </div>
+  <div style="display:flex;gap:6px;">
+    <button onclick="restoreFromDrive()" style="flex:1;background:#065f46;color:white;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:bold;">🔄 RESTORE</button>
+    <button onclick="backupToDrive()" style="flex:1;background:#f59e0b;color:white;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:bold;">☁️ BACKUP</button>
+    <button onclick="clearQuota()" style="background:#ef4444;color:white;border:none;padding:8px 10px;border-radius:6px;font-size:11px;font-weight:bold;">🧹 CLEAN</button>
+  </div>
+</div>
+
+<!-- END v11 -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
