@@ -1,6 +1,52 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- GOOGLE DRIVE AUTO BACKUP & RESTORE - 100% FREE - Added by Misty Voyages Support -->
+<script>
+const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbxwyPbo6Vjot3_6qQBsYLNUDU6aqsExIDm2akrd9BBTYZJKkoNZ0kInQYzRNkkiPFMO/exec';
+console.log('☁️ Travel Desk Drive Backup Initialized - Open: Auto Restore, Close: Auto Backup');
+async function autoRestoreFromDrive(){
+  try{
+    const res = await fetch(DRIVE_BACKUP_URL + '?action=load');
+    const text = await res.text();
+    let backup;
+    try{ backup = JSON.parse(text); }catch{ return; }
+    if(backup.error){ console.log('No backup found yet'); return; }
+    let count=0;
+    Object.keys(backup).forEach(k=>{
+      if(k==='_backupMeta') return;
+      const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k];
+      localStorage.setItem(k,v);
+      count++;
+    });
+    if(count>0){
+      console.log(`✅ Restored ${count} items from Drive - ${backup._backupMeta?.timestamp}`);
+      setTimeout(()=>{ if(confirm(`✅ Auto Restored ${count} items from Drive backup (${new Date(backup._backupMeta.timestamp).toLocaleString()}). Reload page to see restored data?`)) location.reload(); }, 1200);
+    }
+  }catch(e){ console.log('Restore error', e); }
+}
+async function autoBackupToDrive(){
+  try{
+    const allData={};
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k){ try{ allData[k]=JSON.parse(localStorage.getItem(k)); }catch{ allData[k]=localStorage.getItem(k); } }
+    }
+    if(Object.keys(allData).length===0) return;
+    allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length};
+    const dataStr=JSON.stringify(allData);
+    await fetch(DRIVE_BACKUP_URL + '?action=save&data='+encodeURIComponent(dataStr),{method:'GET',mode:'no-cors'});
+    console.log('✅ Auto Backup to Drive triggered - '+new Date().toLocaleString());
+  }catch(e){ console.log('Backup error', e); }
+}
+window.addEventListener('load',()=>{ setTimeout(autoRestoreFromDrive,1500); });
+window.addEventListener('beforeunload',()=>{ autoBackupToDrive(); });
+setInterval(autoBackupToDrive, 5*60*1000);
+window.manualBackup = autoBackupToDrive;
+window.manualRestore = autoRestoreFromDrive;
+</script>
+<!-- END GOOGLE DRIVE AUTO BACKUP -->
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
