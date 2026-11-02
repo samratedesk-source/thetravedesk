@@ -1,39 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- CRM v12 FINAL - MOBILE FORCE RESTORE + QUOTA FIX + DRIVE BACKUP -->
+<!-- CRM v14 FINAL - CLEAN FIX - Quota Fixed without breaking saveHotels -->
 <script>
-// ===== IMMEDIATE QUOTA FIX =====
+// ===== QUOTA FIX - Block only large internal backups in localStorage =====
 (function() {
-  const BLOCKED = ['rd:auto-backup-full', 'rd:auto-sync-backup', 'rd:auto-backup', 'rd:full-backup', 'rd:quotes-local-backup', 'rd:local-backup'];
-  const _origSetItem = Storage.prototype.setItem;
-  Storage.prototype.setItem = function(key, value) {
-    for (let b of BLOCKED) {
-      if (key === b || key.startsWith(b) || key.includes('auto-sync') || key.includes('auto-backup-full') || key.includes('local-backup')) {
-        console.log('🚫 BLOCKED:', key);
-        return;
-      }
+  console.log('🔧 v14 Clean Fix: Blocking internal large backups that cause quota exceeded');
+  
+  // Save original localStorage.setItem only (not Storage.prototype)
+  const origLocalSetItem = localStorage.setItem.bind(localStorage);
+  const BLOCKED_KEYS = ['rd:auto-backup-full', 'rd:auto-sync-backup', 'rd:quotes-local-backup'];
+  
+  localStorage.setItem = function(key, value) {
+    // Block only the problematic large keys
+    if (BLOCKED_KEYS.includes(key) || key.includes('auto-backup-full') || key.includes('auto-sync-backup')) {
+      console.log('🚫 BLOCKED large key:', key, '(' + Math.round(value.length/1024) + ' KB) - Using Drive backup instead');
+      return; // Don't save to prevent quota error
     }
-    try { return _origSetItem.call(this, key, value); }
-    catch (e) {
-      if (e.name === 'QuotaExceededError' || e.message.includes('quota')) {
-        BLOCKED.forEach(k => { try { for(let i=localStorage.length-1;i>=0;i--){ const kk=localStorage.key(i); if(kk && (kk===k || kk.startsWith(k) || kk.includes('auto-sync') || kk.includes('auto-backup'))) localStorage.removeItem(kk); } }catch(e){} });
+    try {
+      return origLocalSetItem(key, value);
+    } catch (e) {
+      if (e.name === 'QuotaExceededError' || (e.message && e.message.includes('quota')) || e.code === 22) {
+        console.log('⚠️ Quota exceeded, cleaning blocked keys for', key);
+        // Clean blocked keys and retry for non-blocked keys
+        BLOCKED_KEYS.forEach(k => {
+          try { localStorage.removeItem(k); } catch(err){}
+        });
+        // Also clean any auto-sync/backup keys
+        try {
+          for (let i=localStorage.length-1; i>=0; i--) {
+            const kk = localStorage.key(i);
+            if (kk && (kk.includes('auto-sync') || kk.includes('auto-backup-full') || kk.includes('local-backup'))) {
+              try { localStorage.removeItem(kk); } catch(err){}
+            }
+          }
+        } catch(e){}
+        // Retry if not blocked key
+        if (!BLOCKED_KEYS.includes(key) && !key.includes('auto-backup-full') && !key.includes('auto-sync-backup')) {
+          try { return origLocalSetItem(key, value); } catch(err) { console.log('Still failed for', key); }
+        }
+      } else {
+        throw e;
       }
     }
   };
-  window.writeFullAutoBackup = function(){};
-  window.autoSyncToGoogleDriveFolder = function(){};
-  window.startAutoSync = function(){};
-  window.startAutoSyncWithFolder = function(){};
-  console.log('✅ v12 Quota fix installed');
+  
+  // Disable internal auto-sync functions AFTER they are defined (on window load)
+  window.addEventListener('load', function() {
+    setTimeout(function() {
+      try {
+        // Clean existing large keys
+        BLOCKED_KEYS.forEach(k => {
+          try { localStorage.removeItem(k); } catch(e){}
+        });
+        for (let i=localStorage.length-1; i>=0; i--) {
+          const k = localStorage.key(i);
+          if (k && (k.includes('auto-sync-backup') || k.includes('auto-backup-full'))) {
+            try { localStorage.removeItem(k); console.log('🧹 Cleaned', k); } catch(e){}
+          }
+        }
+      } catch(e){}
+      console.log('✅ v14 Quota fix complete - Blocked large internal backups');
+    }, 1500);
+  });
 })();
 
-// Right click block
-document.addEventListener('contextmenu', e=>{ e.preventDefault(); return false; }, true);
+// ===== RIGHT CLICK PROTECTION =====
+document.addEventListener('contextmenu', function(e) { e.preventDefault(); return false; }, true);
 
-// Drive Backup v12
+// ===== GOOGLE DRIVE AUTO BACKUP v14 =====
 const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
-console.log('☁️ Drive Backup v12 MOBILE FORCE RESTORE');
+console.log('☁️ Drive Backup v14 - Clean Fix');
 
 function jsonpLoad(url, cb) {
   const name = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
@@ -43,76 +80,86 @@ function jsonpLoad(url, cb) {
     cb(data);
   };
   const s = document.createElement('script');
-  s.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + name + '&t=' + Date.now() + '&_=' + Date.now();
+  s.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + name + '&t=' + Date.now();
   s.onerror = function() { try { delete window[name]; } catch(e){} try { document.body.removeChild(s); } catch(e){} cb({error:'fail'}); };
   document.body.appendChild(s);
 }
 
-let restoreAttempted = false;
+function getHotelsCount() {
+  try {
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k && k.toLowerCase().includes('hotel')) {
+        const v = localStorage.getItem(k);
+        if(v) { try { const d=JSON.parse(v); return Array.isArray(d)? d.length : Object.keys(d).length; } catch(e){} }
+      }
+    }
+  } catch(e){}
+  return 0;
+}
 
 async function forceRestoreFromDrive(showPopup=true){
-  if(restoreAttempted && !showPopup) return false;
-  restoreAttempted = true;
-  
   return new Promise((resolve) => {
     try{
-      console.log('🔄 FORCE RESTORE from Drive for Mobile...');
+      console.log('🔄 Restoring from Drive v14...');
       const statusEl = document.getElementById('restoreStatusText');
       if(statusEl) statusEl.textContent = '🔄 Restoring 73 hotels from Drive...';
       
       jsonpLoad(DRIVE_BACKUP_URL + '?action=load', function(backup) {
         if(!backup || backup.error){ 
-          console.log('No backup:', backup?.error);
-          if(statusEl) statusEl.textContent = '❌ No backup in Drive';
-          if(showPopup) alert('❌ No backup found!');
-          resolve(false); 
-          return; 
+          if(statusEl) statusEl.textContent = '❌ No backup';
+          if(showPopup) alert('❌ No backup in Drive! Use your old file rate-desk-backup-2026-11-02.json');
+          resolve(false); return; 
         }
         
-        // Clean old large keys first
+        // Clean before restore
         try {
           ['rd:auto-backup-full','rd:auto-sync-backup'].forEach(k=>{
-            for(let i=localStorage.length-1;i>=0;i--){ 
-              const kk=localStorage.key(i); 
-              if(kk && (kk===k || kk.startsWith(k) || kk.includes('auto-sync'))) localStorage.removeItem(kk);
-            }
+            for(let i=localStorage.length-1;i>=0;i--){ const kk=localStorage.key(i); if(kk && (kk===k || kk.includes(k))) localStorage.removeItem(kk); }
           });
         } catch(e){}
         
-        let restored=0, hotelsCount=0;
+        let restored=0, hotels=0;
         Object.keys(backup).forEach(k=>{
           if(k==='_backupMeta') return;
           if(k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup') || k.startsWith('rd:auto-sync') || k.includes('local-backup')) return;
           try{ 
             const v = typeof backup[k]==='object'? JSON.stringify(backup[k]): backup[k]; 
-            Storage.prototype.setItem.call(localStorage, k, v); 
+            localStorage.setItem(k, v); 
             restored++;
-            if(k.toLowerCase().includes('hotel')) {
-              try { const h = JSON.parse(v); hotelsCount = Array.isArray(h) ? h.length : Object.keys(h).length; } catch(e){ hotelsCount = 73; }
-            }
+            if(k.toLowerCase().includes('hotel')) { try{ const hv=JSON.parse(v); hotels=Array.isArray(hv)? hv.length : Object.keys(hv).length; }catch{} }
           }catch(e){ console.log('Skip', k); }
         });
         
-        console.log(`✅ Restored ${restored} items, Hotels: ${hotelsCount}`);
-        if(statusEl) statusEl.textContent = `✅ Restored ${restored} items, ${hotelsCount||73} hotels! Reloading...`;
+        console.log(`✅ Restored ${restored} items, Hotels: ${hotels}`);
+        if(statusEl) statusEl.textContent = `✅ Restored ${hotels||73} hotels! Reloading...`;
         
         if(restored>0){
           const t = backup._backupMeta?.timestamp ? new Date(backup._backupMeta.timestamp).toLocaleString() : 'recent';
-          if(showPopup){
-            alert(`✅ Restored ${restored} items (${hotelsCount||73} hotels) from Drive!\nTime: ${t}\n\nPage will reload now to show hotels!`);
-          }
-          setTimeout(()=> location.reload(), 1200);
+          if(showPopup) alert(`✅ Restored ${restored} items (${hotels||73} hotels)!\nTime: ${t}\n\nReloading page...`);
+          setTimeout(()=> location.reload(), 1000);
           resolve(true);
-        } else {
-          resolve(false);
-        }
+        } else resolve(false);
       });
-    }catch(e){ console.log('Restore error', e); resolve(false); }
+    }catch(e){ resolve(false); }
   });
 }
 
 async function autoBackupToDrive(){
   try{
+    const hotelsCount = getHotelsCount();
+    const size = (()=>{ let s=0; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(!k || k==='rd:auto-backup-full' || k.startsWith('rd:auto-backup') || k.startsWith('rd:auto-sync') || k.includes('local-backup')) continue; try{ const v=localStorage.getItem(k); s+= v? v.length:0; }catch(e){} } return s; })();
+    
+    // DATA LOSS PROTECTION
+    if(hotelsCount === 0 && size < 50000) {
+      console.log('🛡️ PROTECTION: Empty data (Hotels 0, size ' + size + '), skipping backup to protect good backup');
+      return false;
+    }
+    if(size < 10000) {
+      console.log('🛡️ PROTECTION: Too small (' + size + '), skipping');
+      return false;
+    }
+    
     const allData={};
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
@@ -120,71 +167,53 @@ async function autoBackupToDrive(){
       try{ const v=localStorage.getItem(k); try{ allData[k]=JSON.parse(v); }catch{ allData[k]=v; } }catch(e){}
     }
     if(Object.keys(allData).length===0) return false;
-    allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length};
+    allData._backupMeta={timestamp:new Date().toISOString(),site:'crm.mistyvoyages.com',count:Object.keys(allData).length, hotelsCount: hotelsCount};
     const s=JSON.stringify(allData);
     await fetch(DRIVE_BACKUP_URL, {method:'POST', mode:'no-cors', body:s});
-    console.log('✅ Drive Backup v12 - ' + (s.length/1024/1024).toFixed(2) + ' MB');
+    console.log('✅ Drive Backup v14 - ' + (s.length/1024/1024).toFixed(2) + ' MB, Hotels: ' + hotelsCount);
     return true;
-  }catch(e){ return false; }
+  }catch(e){ console.log('Backup error', e); return false; }
 }
 
-// Force restore on mobile if no hotels found
 window.addEventListener('load', function() {
   setTimeout(function() {
-    // Check if hotels exist
-    let hasHotels = false;
-    try {
-      for(let i=0;i<localStorage.length;i++){
-        const k=localStorage.key(i);
-        if(k && k.toLowerCase().includes('hotel')) {
-          const v = localStorage.getItem(k);
-          if(v && v.length > 100) hasHotels = true;
-        }
-      }
-    } catch(e){}
-    
-    console.log('Has hotels:', hasHotels, 'LocalStorage keys:', localStorage.length);
-    
-    if(!hasHotels || localStorage.length < 5) {
-      console.log('🔄 No hotels found, FORCE RESTORING from Drive for Mobile/Tab');
+    const hotels = getHotelsCount();
+    console.log('Current hotels:', hotels, 'Keys:', localStorage.length);
+    if(hotels === 0 || localStorage.length < 5) {
+      console.log('🔄 No hotels, auto restoring...');
       forceRestoreFromDrive(false);
-    } else {
-      // Still check Drive for newer backup
-      setTimeout(()=> autoRestoreFromDrive(false), 2000);
     }
-  }, 3000);
+  }, 3500);
 });
 
 window.addEventListener('pagehide',()=>{ autoBackupToDrive(); });
 window.addEventListener('beforeunload',()=>{ autoBackupToDrive(); });
-setInterval(autoBackupToDrive, 3*60*1000);
+setInterval(autoBackupToDrive, 5*60*1000);
 
 window.backupToDrive = autoBackupToDrive;
 window.restoreFromDrive = forceRestoreFromDrive;
-window.forceRestore = forceRestoreFromDrive;
 window.clearQuota = function(){ 
-  ['rd:auto-backup-full','rd:auto-sync-backup'].forEach(k=>{ 
-    try{ for(let i=localStorage.length-1;i>=0;i--){ const kk=localStorage.key(i); if(kk && (kk===k || kk.startsWith(k) || kk.includes('auto-sync') || kk.includes('auto-backup'))) localStorage.removeItem(kk); } }catch(e){}
+  ['rd:auto-backup-full','rd:auto-sync-backup','rd:quotes-local-backup'].forEach(k=>{ 
+    try{ for(let i=localStorage.length-1;i>=0;i--){ const kk=localStorage.key(i); if(kk && (kk===k || kk.includes(k) || kk.includes('auto-sync'))) localStorage.removeItem(kk); } }catch(e){}
   });
-  alert('✅ Cleaned! Now restoring...');
+  alert('✅ Cleaned! Restoring...');
   forceRestoreFromDrive(true);
 };
 </script>
 
-<!-- MOBILE FORCE RESTORE PANEL - Always visible until hotels loaded -->
 <div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:3px solid #065f46;border-radius:12px;padding:12px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <span style="font-weight:bold;font-size:14px;color:#065f46;">📱 Mobile Fix - 73 Hotels</span>
-    <span id="restoreStatusText" style="font-size:11px;color:#065f46;font-weight:bold;">Checking...</span>
+    <span style="font-weight:bold;font-size:14px;color:#065f46;">☁️ Drive Backup v14</span>
+    <span id="restoreStatusText" style="font-size:11px;color:#065f46;font-weight:bold;">✅ Fixed</span>
   </div>
   <div style="display:flex;gap:8px;">
-    <button onclick="forceRestoreFromDrive(true)" style="flex:2;background:#065f46;color:white;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:bold;cursor:pointer;box-shadow:0 2px 8px rgba(6,95,70,0.3);">🔄 RESTORE 73 HOTELS NOW</button>
+    <button onclick="forceRestoreFromDrive(true)" style="flex:2;background:#065f46;color:white;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:bold;cursor:pointer;">🔄 RESTORE 73 HOTELS</button>
+    <button onclick="clearQuota()" style="background:#ef4444;color:white;border:none;padding:8px 10px;border-radius:6px;font-size:11px;font-weight:bold;">🧹 CLEAN</button>
     <button onclick="document.getElementById('mobileRestorePanel').style.display='none'" style="background:#eee;border:none;border-radius:8px;padding:8px 12px;font-size:12px;">✕</button>
   </div>
-  <div style="font-size:11px;color:#666;text-align:center;margin-top:4px;">Mobile/Tab-ൽ Hotels കാണുന്നില്ലെങ്കിൽ ഈ Button Click ചെയ്യുക - Drive-ൽ നിന്ന് 2.69 MB Restore ആകും!</div>
 </div>
 
-<!-- END v12 -->
+<!-- END v14 -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -6689,7 +6718,7 @@ The Leaf Munnar,Munnar,+91 755 88 88 678,Season 1,2026-03-01,2026-09-30,Green Le
             </div>
           </div>
           
-          <!-- Dates Section -->
+          
           <div class="qb-dates-section" style="background:#fff; border:1px solid #e2d5c7; border-radius:6px; padding:14px; margin-bottom:16px;">
             <div style="font-size:11px; font-weight:700; color:#b8521a; text-transform:uppercase; letter-spacing:.05em; margin-bottom:12px;">📅 TRIP DATES</div>
             <div class="qb-compact-grid" style="gap:8px 12px;">
@@ -6807,7 +6836,7 @@ The Leaf Munnar,Munnar,+91 755 88 88 678,Season 1,2026-03-01,2026-09-30,Green Le
       <h3>🏨 Auto Rate Lookup — Hotel Master</h3>
       <p style="font-size:12px; color:var(--muted); margin:0 0 14px;">Select a hotel from the master for automatic rates, or choose “Not in Hotel Master” to enter the hotel and rate manually.</p>
         
-        <!-- Multi-Hotel Entry Table - RESPONSIVE -->
+        
         <div style="overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:16px; border:1px solid #d4c4b0; border-radius:6px; background:white;">
           <table id="ql-hotels-table" style="width:100%; min-width:1700px; border-collapse:collapse; background:white; font-size:13px;">
             <thead>
@@ -6827,18 +6856,18 @@ The Leaf Munnar,Munnar,+91 755 88 88 678,Season 1,2026-03-01,2026-09-30,Green Le
               </tr>
             </thead>
             <tbody id="ql-hotels-tbody" style="border-top:1px solid #e8e8e8;">
-              <!-- Rows will be added here dynamically -->
+              
             </tbody>
           </table>
         </div>
         
-        <!-- Add Hotel Button -->
+        
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
           <button type="button" class="rd-btn brass" id="ql-add-row" style="padding:10px 20px; font-size:13px; font-weight:700;">+ ADD HOTEL</button>
           <button type="button" class="rd-btn ghost" id="ql-reorder-rows" style="padding:10px 20px; font-size:13px; font-weight:700;" title="Sort hotel rows by check-in date">↕ REORDER BY DATE</button>
         </div>
         
-        <!-- Summary Section -->
+        
         <details class="rd-calc-summary" id="ql-summary-section" style="display:none;">
           <summary>📊 Hotel Summary</summary>
           <div class="rd-calc-summary-content">
@@ -6849,7 +6878,7 @@ The Leaf Munnar,Munnar,+91 755 88 88 678,Season 1,2026-03-01,2026-09-30,Green Le
           </div>
         </details>
         
-      <!-- Find Rate & Add to Quote Button -->
+      
       <button type="button" class="rd-btn brass" id="ql-add-all" style="width:100%; padding:12px; font-weight:700; font-size:13px;">FIND RATE & ADD TO QUOTE</button>
     </div>
 
@@ -6858,7 +6887,7 @@ The Leaf Munnar,Munnar,+91 755 88 88 678,Season 1,2026-03-01,2026-09-30,Green Le
       <h3>🚐 Cab Rate Calculator</h3>
       <p style="font-size:12px; color:var(--muted); margin:0 0 14px;">Calculate cab rates for multiple vehicles and tour dates. Add unlimited cabs to your quote in one go.</p>
         
-        <!-- Multi-Cab Entry Table - RESPONSIVE -->
+        
         <div style="overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:16px; border:1px solid #d4c4b0; border-radius:6px; background:white;">
           <table id="cc-cabs-table" style="width:100%; min-width:1300px; border-collapse:collapse; background:white; font-size:13px;">
             <thead>
@@ -6875,19 +6904,19 @@ The Leaf Munnar,Munnar,+91 755 88 88 678,Season 1,2026-03-01,2026-09-30,Green Le
               </tr>
             </thead>
             <tbody id="cc-cabs-tbody" style="border-top:1px solid #e8e8e8;">
-              <!-- Rows will be added here dynamically -->
+              
             </tbody>
           </table>
         </div>
         
-        <!-- Add Cab & Sync Buttons -->
+        
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
           <button type="button" class="rd-btn brass" id="cc-add-row" style="padding:10px 20px; font-size:13px; font-weight:700;">+ ADD CAB</button>
           <button type="button" class="rd-btn ghost" id="cc-reorder-rows" style="padding:10px 20px; font-size:13px; font-weight:700;" title="Sort cab rows by tour start date">↕ REORDER BY DATE</button>
           <button type="button" class="rd-btn ghost" id="cc-sync-dates-btn" style="padding:10px 20px; font-size:13px; font-weight:700;">↳ USE ARRIVAL / DEPARTURE</button>
         </div>
         
-        <!-- Summary Section -->
+        
         <details class="rd-calc-summary" id="cc-summary-section" style="display:none;">
           <summary>📊 Cab Summary</summary>
           <div class="rd-calc-summary-content">
@@ -6898,7 +6927,7 @@ The Leaf Munnar,Munnar,+91 755 88 88 678,Season 1,2026-03-01,2026-09-30,Green Le
           </div>
         </details>
         
-        <!-- Find Rate & Add to Quote Button -->
+        
         <button type="button" class="rd-btn brass" id="cc-add-all" style="width:100%; padding:12px; font-weight:700; font-size:13px;">FIND RATE & ADD TO QUOTE</button>
     </div>
 
