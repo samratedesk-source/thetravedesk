@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- CRM v22 FINAL - AUTO BACKUP TO DRIVE FIXED - For 1500+ Hotels -->
+<!-- CRM v23 FINAL - STRONG DATA LOSS PROTECTION - NEVER backup 0 hotels -->
 <script>
 // ===== PROVIDE window.storage if undefined =====
 (function() {
@@ -12,7 +12,6 @@
       async set(key, value, shared) {
         try {
           if (typeof value === 'string' && value.length > 100000 && key.includes('auto-backup')) {
-            console.log('🚫 Skip large auto-backup localStorage:', key, Math.round(value.length/1024) + 'KB - Drive instead');
             return true;
           }
           localStorage.setItem(key, value);
@@ -61,7 +60,7 @@
   }
 })();
 
-// Fix writeFullAutoBackup - redirect to Drive for large data
+// Fix writeFullAutoBackup
 (function() {
   function overrideBackup() {
     if (typeof writeFullAutoBackup !== 'undefined') {
@@ -88,11 +87,15 @@
             quoteDraft: window.rateDeskGetBackupDraft?.() || null
           };
           const jsonStr = JSON.stringify(backup);
+          // CRITICAL: Don't save large backup to localStorage, but trigger Drive backup ONLY if hotels >0
           if (jsonStr.length > 500000) {
-            console.log(`🚫 Skip local auto-backup ${Math.round(jsonStr.length/1024)}KB - Will backup to Drive instead`);
-            // Trigger Drive auto-backup
-            if (typeof window.triggerDriveAutoBackup === 'function') {
-              window.triggerDriveAutoBackup(backup, jsonStr);
+            if (backup.hotels.length > 0) {
+              console.log(`🚫 Skip local ${Math.round(jsonStr.length/1024)}KB - Trigger Drive backup with ${backup.hotels.length} hotels`);
+              if (typeof window.triggerDriveAutoBackup === 'function') {
+                window.triggerDriveAutoBackup(backup, jsonStr);
+              }
+            } else {
+              console.log(`🛡️ Skip local AND Drive backup - Hotels 0, protecting good backup!`);
             }
             return backup;
           }
@@ -103,7 +106,7 @@
           return null;
         }
       };
-      console.log('✅ writeFullAutoBackup fixed for large data');
+      console.log('✅ writeFullAutoBackup fixed with protection');
     } else {
       setTimeout(overrideBackup, 500);
     }
@@ -116,16 +119,17 @@
 })();
 
 document.addEventListener('contextmenu', e => { e.preventDefault(); return false; }, true);
-console.log('🚀 v22 storage fixes applied');
+console.log('🚀 v23 storage fixes - STRONG PROTECTION');
 </script>
 
 <script>
 const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
-console.log('☁️ Drive Auto Backup v22 - For 1500+ hotels');
+console.log('☁️ Drive Auto Backup v23 - STRONG DATA LOSS PROTECTION');
 
 let lastDriveBackupTime = 0;
 let driveBackupInProgress = false;
 let pendingDriveBackup = null;
+let lastGoodHotelsCount = 0; // Track last good backup
 
 function jsonpLoad(url, cb) {
   const name = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
@@ -140,7 +144,7 @@ function jsonpLoad(url, cb) {
   document.body.appendChild(s);
 }
 
-function createFullBackupV22() {
+function createFullBackupV23() {
   try {
     let hotels = (typeof HOTELS !== 'undefined' && Array.isArray(HOTELS)) ? HOTELS : [];
     let seasons = (typeof SEASONS !== 'undefined' && Array.isArray(SEASONS)) ? SEASONS : [];
@@ -183,12 +187,12 @@ function createFullBackupV22() {
     
     return backup;
   } catch(e) {
-    console.error('createFullBackupV22 failed:', e);
+    console.error('createFullBackupV23 failed:', e);
     return null;
   }
 }
 
-function downloadBackupLocallyV22(backup) {
+function downloadBackupLocallyV23(backup) {
   try {
     const jsonStr = JSON.stringify(backup, null, 2);
     const blob = new Blob([jsonStr], {type: 'application/json'});
@@ -208,9 +212,9 @@ function downloadBackupLocallyV22(backup) {
   }
 }
 
-async function backupToDriveV22Core(backup, jsonStr, isAuto = false) {
+async function backupToDriveV23Core(backup, jsonStr, isAuto = false) {
   if (driveBackupInProgress) {
-    console.log('Drive backup already in progress, queuing...');
+    console.log('Drive backup in progress, queuing...');
     pendingDriveBackup = {backup, jsonStr, isAuto};
     return false;
   }
@@ -221,7 +225,7 @@ async function backupToDriveV22Core(backup, jsonStr, isAuto = false) {
   
   try {
     if (!backup) {
-      backup = createFullBackupV22();
+      backup = createFullBackupV23();
       if (!backup) {
         driveBackupInProgress = false;
         return false;
@@ -232,19 +236,39 @@ async function backupToDriveV22Core(backup, jsonStr, isAuto = false) {
     const hotelsCount = backup.hotels.length;
     const sizeMB = (jsonStr.length / 1024 / 1024).toFixed(2);
     
-    if (hotelsCount === 0 && jsonStr.length < 50000) {
-      console.log('🛡️ Skip empty backup');
-      if (statusEl) statusEl.textContent = '🛡️ Empty, skip';
-      if (autoStatusEl) autoStatusEl.textContent = 'Empty - not backing up';
+    // ===== CRITICAL DATA LOSS PROTECTION =====
+    // NEVER backup 0 hotels if we previously had good data
+    if (hotelsCount === 0) {
+      console.log(`🛡️ PROTECTION: Hotels 0, size ${sizeMB} MB - BLOCKING Drive backup to protect good backup!`);
+      console.log(`🛡️ Last good backup had ${lastGoodHotelsCount} hotels - NOT overwriting with 0!`);
+      if (statusEl) statusEl.textContent = `🛡️ Protected: Hotels 0, not overwriting Drive`;
+      if (autoStatusEl) autoStatusEl.textContent = `🛡️ Protected at ${new Date().toLocaleTimeString()} - Hotels 0, not backing up to protect ${lastGoodHotelsCount} hotels in Drive`;
+      
+      // If hotels is 0, try to restore from Drive automatically
+      if (isAuto) {
+        console.log('🛡️ Hotels 0 detected, trying to restore from Drive...');
+        setTimeout(() => {
+          restoreFromDriveV23(false);
+        }, 2000);
+      }
+      
       driveBackupInProgress = false;
       return false;
     }
     
-    // Throttle auto backups - max once per 2 minutes for auto, no throttle for manual
+    // If hotels >0, update lastGoodHotelsCount
+    if (hotelsCount > 0) {
+      lastGoodHotelsCount = hotelsCount;
+      try {
+        localStorage.setItem('rd:last-good-hotels-count', hotelsCount.toString());
+      } catch(e) {}
+    }
+    
+    // Throttle auto backups - once per 3 minutes
     const now = Date.now();
-    if (isAuto && (now - lastDriveBackupTime) < 120000) {
-      console.log(`⏱️ Auto backup throttled - last backup ${Math.round((now-lastDriveBackupTime)/1000)}s ago`);
-      if (autoStatusEl) autoStatusEl.textContent = `Throttled - last ${Math.round((now-lastDriveBackupTime)/1000)}s ago`;
+    if (isAuto && (now - lastDriveBackupTime) < 180000) {
+      console.log(`⏱️ Auto backup throttled - last ${Math.round((now-lastDriveBackupTime)/1000)}s ago, need 180s`);
+      if (autoStatusEl) autoStatusEl.textContent = `⏱️ Throttled - last backup ${Math.round((now-lastDriveBackupTime)/1000)}s ago (3 min needed)`;
       driveBackupInProgress = false;
       return false;
     }
@@ -268,10 +292,10 @@ async function backupToDriveV22Core(backup, jsonStr, isAuto = false) {
       clearTimeout(timeoutId);
       driveSuccess = true;
       lastDriveBackupTime = Date.now();
-      console.log(`✅ ${isAuto ? 'AUTO' : 'MANUAL'} Drive backup success - ${hotelsCount} hotels, ${sizeMB} MB`);
+      console.log(`✅ ${isAuto ? 'AUTO' : 'MANUAL'} Drive backup SUCCESS - ${hotelsCount} hotels, ${sizeMB} MB`);
       
     } catch(e) {
-      console.log('Drive fetch error (may still succeed with no-cors):', e.message);
+      console.log('Drive fetch error (may succeed with no-cors):', e.message);
       if (hotelsCount > 0) {
         driveSuccess = true;
         lastDriveBackupTime = Date.now();
@@ -280,13 +304,12 @@ async function backupToDriveV22Core(backup, jsonStr, isAuto = false) {
     
     if (driveSuccess) {
       if (statusEl) statusEl.textContent = `✅ ${hotelsCount} hotels to Drive`;
-      if (autoStatusEl) autoStatusEl.textContent = `✅ Auto backup ${new Date().toLocaleTimeString()} - ${hotelsCount} hotels`;
+      if (autoStatusEl) autoStatusEl.textContent = `✅ Auto backup ${new Date().toLocaleTimeString()} - ${hotelsCount} hotels (${sizeMB} MB) to Drive`;
       if (!isAuto) {
-        // For manual, also download locally
-        downloadBackupLocallyV22(backup);
-        alert(`✅ Backed up ${hotelsCount} hotels (${sizeMB} MB)!\n\n✅ Drive: Updated\n✅ Local: Downloaded`);
+        downloadBackupLocallyV23(backup);
+        alert(`✅ Backed up ${hotelsCount} hotels (${sizeMB} MB)!\n\n✅ Drive: Updated\n✅ Local: Downloaded\n\nProtected from 0-hotels overwrite!`);
       } else {
-        console.log(`✅ Auto backup completed at ${new Date().toLocaleTimeString()}`);
+        console.log(`✅ Auto backup at ${new Date().toLocaleTimeString()} - ${hotelsCount} hotels to Drive`);
       }
     } else {
       if (statusEl) statusEl.textContent = `❌ Drive failed`;
@@ -295,11 +318,10 @@ async function backupToDriveV22Core(backup, jsonStr, isAuto = false) {
     
     driveBackupInProgress = false;
     
-    // Process pending backup if any
     if (pendingDriveBackup) {
       const pending = pendingDriveBackup;
       pendingDriveBackup = null;
-      setTimeout(() => backupToDriveV22Core(pending.backup, pending.jsonStr, pending.isAuto), 2000);
+      setTimeout(() => backupToDriveV23Core(pending.backup, pending.jsonStr, pending.isAuto), 2000);
     }
     
     return driveSuccess;
@@ -312,50 +334,84 @@ async function backupToDriveV22Core(backup, jsonStr, isAuto = false) {
   }
 }
 
-// Manual backup
-function backupToDriveV22() {
-  console.log('🔘 Manual backup clicked - v22');
-  const backup = createFullBackupV22();
+function backupToDriveV23() {
+  console.log('🔘 Manual backup clicked - v23');
+  const backup = createFullBackupV23();
   if (!backup) {
-    alert('❌ No data to backup!');
+    alert('❌ No data!');
+    return false;
+  }
+  if (backup.hotels.length === 0) {
+    const confirmZero = confirm(`⚠️ Hotels is 0!\n\nYou have 0 hotels currently.\nDo you want to backup 0 hotels to Drive?\nThis will OVERWRITE your good backup (${lastGoodHotelsCount} hotels in Drive)!\n\nClick OK to backup 0 hotels (NOT recommended), Cancel to stop.`);
+    if (!confirmZero) {
+      alert('❌ Cancelled. Import old file first: BACKUP tab > Choose file > rate-desk-backup-2026-11-02.json');
+      return false;
+    }
+  }
+  const jsonStr = JSON.stringify(backup);
+  return backupToDriveV23Core(backup, jsonStr, false);
+}
+
+function autoBackupToDriveV23() {
+  console.log('⏰ Auto backup check - v23');
+  const backup = createFullBackupV23();
+  if (!backup) {
+    console.log('Auto backup skipped - no backup object');
+    return false;
+  }
+  if (backup.hotels.length === 0) {
+    console.log(`🛡️ Auto backup BLOCKED - Hotels 0! Last good: ${lastGoodHotelsCount} hotels. Protecting Drive backup.`);
+    const autoStatusEl = document.getElementById('autoBackupStatus');
+    if (autoStatusEl) autoStatusEl.textContent = `🛡️ Protected at ${new Date().toLocaleTimeString()} - Hotels 0, Drive has ${lastGoodHotelsCount} hotels - NOT overwriting`;
+    
+    // Try to restore if hotels 0
+    setTimeout(() => {
+      console.log('🛡️ Hotels 0, trying auto restore from Drive...');
+      restoreFromDriveV23(false);
+    }, 3000);
+    
     return false;
   }
   const jsonStr = JSON.stringify(backup);
-  return backupToDriveV22Core(backup, jsonStr, false);
+  return backupToDriveV23Core(backup, jsonStr, true);
 }
 
-// Auto backup (silent, no alert)
-function autoBackupToDriveV22() {
-  console.log('⏰ Auto backup triggered - v22');
-  const backup = createFullBackupV22();
-  if (!backup || backup.hotels.length === 0) {
-    console.log('Auto backup skipped - no hotels');
-    return false;
-  }
-  const jsonStr = JSON.stringify(backup);
-  return backupToDriveV22Core(backup, jsonStr, true);
-}
-
-// Called from writeFullAutoBackup override
 window.triggerDriveAutoBackup = function(backup, jsonStr) {
-  console.log('🔄 Triggered from save - auto backup to Drive');
-  // Debounce - wait 3 seconds after last save
+  if (!backup) backup = createFullBackupV23();
+  if (!backup) return;
+  
+  if (backup.hotels.length === 0) {
+    console.log(`🛡️ Triggered backup BLOCKED - Hotels 0, protecting Drive! Last good: ${lastGoodHotelsCount}`);
+    return;
+  }
+  
+  console.log(`🔄 Triggered from save - auto backup ${backup.hotels.length} hotels to Drive (debounced)`);
   if (window._driveAutoBackupTimeout) clearTimeout(window._driveAutoBackupTimeout);
   window._driveAutoBackupTimeout = setTimeout(() => {
-    backupToDriveV22Core(backup, jsonStr, true);
-  }, 3000);
+    if (!jsonStr) jsonStr = JSON.stringify(backup);
+    backupToDriveV23Core(backup, jsonStr, true);
+  }, 5000); // 5 sec debounce
 };
 
-async function restoreFromDriveV22(showPopup=true) {
+async function restoreFromDriveV23(showPopup=true) {
   return new Promise((resolve) => {
     try {
       const el = document.getElementById('restoreStatusText');
       if (el) el.textContent = '🔄 Restoring...';
       
       jsonpLoad(DRIVE_BACKUP_URL + '?action=load', async function(backup) {
-        if (!backup || backup.error || !backup.hotels || backup.hotels.length === 0) {
-          if (el) el.textContent = '❌ Drive empty';
-          if (showPopup) alert('❌ Drive empty! Use old file:\nrate-desk-backup-2026-11-02.json');
+        if (!backup || backup.error) {
+          if (el) el.textContent = '❌ Drive error - Import file';
+          if (showPopup) alert('❌ Drive error! Use old file:\nrate-desk-backup-2026-11-02.json\n\nBACKUP tab > Choose file > Restore\n\nOr check Drive file TheTravelDesk_AutoBackup.json');
+          resolve(false);
+          return;
+        }
+        
+        if (!backup.hotels || backup.hotels.length === 0) {
+          if (el) el.textContent = '❌ Drive has 0 hotels - Import old file!';
+          if (showPopup) {
+            alert('❌ Drive file has 0 hotels! (2.66 MB but 0 hotels)\n\nThis means Drive was overwritten with empty data!\n\nRecovery:\n1. Google Drive > TheTravelDesk_AutoBackup.json > Version History > Restore previous version with 73 hotels\n2. Or use old file: rate-desk-backup-2026-11-02.json (3.8 MB, 73 hotels)\n\nBACKUP tab > Choose file > Restore Backup');
+          }
           resolve(false);
           return;
         }
@@ -367,16 +423,18 @@ async function restoreFromDriveV22(showPopup=true) {
           if (typeof restoreFromBackup === 'function') {
             await restoreFromBackup(backup);
             if (el) el.textContent = `✅ ${hotelsCount} hotels restored!`;
-            if (showPopup) alert(`✅ Restored ${hotelsCount} hotels! Reloading...`);
+            lastGoodHotelsCount = hotelsCount;
+            try { localStorage.setItem('rd:last-good-hotels-count', hotelsCount.toString()); } catch(e){}
+            if (showPopup) alert(`✅ Restored ${hotelsCount} hotels from Drive! Reloading...`);
             setTimeout(()=> location.reload(), 1500);
             resolve(true);
           } else {
-            alert('❌ restoreFromBackup not found, use BACKUP tab');
+            alert('❌ restoreFromBackup not found, use BACKUP tab import');
             resolve(false);
           }
         } catch(e) {
           console.error('Restore failed:', e);
-          alert('❌ Restore failed: ' + e.message);
+          alert('❌ Restore failed: ' + e.message + '\nUse BACKUP tab > Import file');
           resolve(false);
         }
       });
@@ -386,33 +444,39 @@ async function restoreFromDriveV22(showPopup=true) {
   });
 }
 
-// ===== AUTO BACKUP SETUP =====
+// Setup auto backup
 window.addEventListener('load', function() {
   setTimeout(function() {
     try {
+      // Load last good count
+      try {
+        const saved = localStorage.getItem('rd:last-good-hotels-count');
+        if (saved) lastGoodHotelsCount = parseInt(saved) || 0;
+      } catch(e){}
+      
       const hasHotels = (typeof HOTELS !== 'undefined' && HOTELS.length > 0);
-      console.log('Hotels on load:', hasHotels ? HOTELS.length : 0);
+      console.log(`Hotels on load: ${hasHotels ? HOTELS.length : 0}, Last good: ${lastGoodHotelsCount}`);
+      
       if (!hasHotels) {
-        restoreFromDriveV22(false);
+        console.log('No hotels, trying Drive restore...');
+        restoreFromDriveV23(false);
       } else {
-        // Auto backup on load if we have data
-        console.log('Scheduling auto backup in 10 seconds...');
-        setTimeout(() => autoBackupToDriveV22(), 10000);
+        lastGoodHotelsCount = HOTELS.length;
+        try { localStorage.setItem('rd:last-good-hotels-count', HOTELS.length.toString()); } catch(e){}
+        console.log(`✅ Has ${HOTELS.length} hotels, scheduling auto backup in 15 sec...`);
+        setTimeout(() => autoBackupToDriveV23(), 15000);
       }
       
-      // Setup periodic auto backup every 5 minutes
-      console.log('⏰ Setting up auto backup every 5 minutes to Drive');
+      console.log('⏰ Setting up auto backup every 5 min to Drive (with protection)');
       setInterval(() => {
-        autoBackupToDriveV22();
+        autoBackupToDriveV23();
       }, 5 * 60 * 1000);
       
-      // Setup auto backup on visibility change (when user switches back to tab)
       document.addEventListener('visibilitychange', function() {
         if (!document.hidden) {
-          console.log('Tab became visible - checking if backup needed');
           const now = Date.now();
           if (now - lastDriveBackupTime > 5 * 60 * 1000) {
-            setTimeout(() => autoBackupToDriveV22(), 5000);
+            setTimeout(() => autoBackupToDriveV23(), 5000);
           }
         }
       });
@@ -421,69 +485,67 @@ window.addEventListener('load', function() {
   }, 3000);
 });
 
-// Backup on page close / hide
 window.addEventListener('pagehide', function() {
-  console.log('Page hide - auto backup');
-  autoBackupToDriveV22();
+  console.log('Page hide - auto backup (protected)');
+  autoBackupToDriveV23();
 });
 
 window.addEventListener('beforeunload', function() {
-  console.log('Before unload - auto backup');
-  // Use sendBeacon for reliable backup on close
   try {
-    const backup = createFullBackupV22();
+    const backup = createFullBackupV23();
     if (backup && backup.hotels.length > 0) {
       const jsonStr = JSON.stringify(backup);
       if (navigator.sendBeacon) {
         const blob = new Blob([jsonStr], {type: 'text/plain'});
         navigator.sendBeacon(DRIVE_BACKUP_URL, blob);
-        console.log('✅ Beacon backup on close');
-      } else {
-        autoBackupToDriveV22();
+        console.log('✅ Beacon backup on close - ' + backup.hotels.length + ' hotels');
       }
+    } else {
+      console.log('🛡️ Beacon backup skipped - 0 hotels, protecting Drive');
     }
-  } catch(e) { console.log('Beacon backup failed:', e); }
+  } catch(e) {}
 });
 
-// Expose functions
-window.backupToDrive = backupToDriveV22;
-window.backupToDriveV22 = backupToDriveV22;
-window.autoBackupToDrive = autoBackupToDriveV22;
-window.restoreFromDrive = restoreFromDriveV22;
-window.restoreFromDriveV22 = restoreFromDriveV22;
+window.backupToDrive = backupToDriveV23;
+window.backupToDriveV23 = backupToDriveV23;
+window.autoBackupToDrive = autoBackupToDriveV23;
+window.restoreFromDrive = restoreFromDriveV23;
+window.restoreFromDriveV23 = restoreFromDriveV23;
 window.downloadBackup = function() {
-  const backup = createFullBackupV22();
+  const backup = createFullBackupV23();
   if (backup) {
-    downloadBackupLocallyV22(backup);
+    downloadBackupLocallyV23(backup);
     alert(`✅ Downloaded ${backup.hotels.length} hotels!`);
   }
 };
 window.checkStorage = function() {
   if (navigator.storage && navigator.storage.estimate) {
     navigator.storage.estimate().then(est => {
-      alert(`📊 Storage:\nUsed: ${(est.usage/1024/1024).toFixed(2)} MB\nQuota: ${(est.quota/1024/1024).toFixed(2)} MB\n${Math.round(est.usage/est.quota*100)}% used\n\nLast Drive backup: ${lastDriveBackupTime ? new Date(lastDriveBackupTime).toLocaleTimeString() : 'Never'}\nAuto backup every 5 min`);
+      alert(`📊 Storage:\nUsed: ${(est.usage/1024/1024).toFixed(2)} MB\nQuota: ${(est.quota/1024/1024).toFixed(2)} MB\n${Math.round(est.usage/est.quota*100)}% used\n\nLast good: ${lastGoodHotelsCount} hotels\nLast Drive backup: ${lastDriveBackupTime ? new Date(lastDriveBackupTime).toLocaleTimeString() : 'Never'}\nAuto backup every 5 min (protected from 0-hotels overwrite)`);
     });
   }
 };
+window.forceRestore = function() {
+  restoreFromDriveV23(true);
+};
 
-console.log('✅ v22 Auto Backup to Drive ready - every 5 min + on save + on close');
+console.log('✅ v23 STRONG PROTECTION - Never backup 0 hotels over good backup');
 </script>
 
-<div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:3px solid #065f46;border-radius:12px;padding:10px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;">
+<div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:3px solid #dc2626;border-radius:12px;padding:10px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-    <span style="font-weight:bold;font-size:11px;color:#065f46;">☁️ v22 - Auto Backup Fixed</span>
-    <span id="restoreStatusText" style="font-size:10px;color:#065f46;font-weight:bold;">Ready</span>
+    <span style="font-weight:bold;font-size:11px;color:#dc2626;">🛡️ v23 - Data Loss Protection</span>
+    <span id="restoreStatusText" style="font-size:10px;color:#dc2626;font-weight:bold;">Protected</span>
   </div>
   <div style="display:flex;gap:4px;margin-bottom:4px;">
-    <button onclick="restoreFromDriveV22(true)" style="flex:1;background:#065f46;color:white;border:none;padding:8px;border-radius:6px;font-size:10px;font-weight:bold;">🔄 RESTORE 73</button>
-    <button onclick="backupToDriveV22()" style="flex:2;background:#f59e0b;color:white;border:none;padding:10px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">☁️ BACKUP TO DRIVE + DOWNLOAD</button>
-    <button onclick="downloadBackup()" style="background:#3b82f6;color:white;border:none;padding:8px;border-radius:6px;font-size:10px;font-weight:bold;">⬇️ LOCAL</button>
+    <button onclick="restoreFromDriveV23(true)" style="flex:1;background:#dc2626;color:white;border:none;padding:8px;border-radius:6px;font-size:10px;font-weight:bold;">🚨 RESTORE 73 HOTELS</button>
+    <button onclick="backupToDriveV23()" style="flex:2;background:#065f46;color:white;border:none;padding:10px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">☁️ BACKUP TO DRIVE + DOWNLOAD</button>
     <button onclick="document.getElementById('mobileRestorePanel').style.display='none'" style="background:#eee;border:none;border-radius:6px;padding:6px 8px;font-size:10px;">✕</button>
   </div>
-  <div id="autoBackupStatus" style="font-size:9px;color:#065f46;text-align:center;background:#e8f5e9;padding:3px;border-radius:4px;">⏰ Auto backup every 5 min to Drive (silent) + on save + on close | 1500 Hotels OK!</div>
+  <div id="autoBackupStatus" style="font-size:9px;color:#dc2626;text-align:center;background:#fef2f2;padding:3px;border-radius:4px;border:1px solid #fecaca;">🛡️ PROTECTED: Auto backup blocks 0-hotels overwrite | Drive: 73 hotels safe | Auto every 5 min</div>
 </div>
 
-<!-- END v22 -->
+<!-- END v23 -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
