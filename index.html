@@ -1,56 +1,276 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- CRM v27 TAB SYNC FIX - Fix Drive error in new tab, sync via localStorage + BroadcastChannel -->
+<!-- CRM v28 PWA INSTALLABLE - Full Screen App, No Refresh, Install on Desktop/Laptop/Mobile/Tab -->
+<!-- PWA Meta Tags -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#065f46">
+<meta name="background-color" content="#f8f6f0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Travel Desk">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="Travel Desk">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23065f46'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='60' fill='white'>🏨</text></svg>">
+<meta name="msapplication-TileColor" content="#065f46">
+<meta name="msapplication-tap-highlight" content="no">
+
+<style>
+/* PWA Standalone Styles - Hide browser UI, full screen */
+@media (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    overscroll-behavior: none; /* Prevent pull-to-refresh */
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Hide install button when already installed */
+  #pwaInstallPanel { display: none !important; }
+}
+
+/* Prevent pull-to-refresh on mobile */
+html, body {
+  overscroll-behavior-y: contain;
+  overscroll-behavior-x: none;
+}
+
+/* PWA Install Prompt Styles */
+#pwaInstallPanel {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #065f46, #047857);
+  color: white;
+  border-radius: 12px;
+  padding: 12px 16px;
+  z-index: 9999999;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  font-family: system-ui, -apple-system, sans-serif;
+  display: none;
+  max-width: 90%;
+  width: 400px;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from { transform: translateX(-50%) translateY(-100%); opacity: 0; }
+  to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+#pwaInstallPanel.show {
+  display: block;
+}
+</style>
+
+<script>
+// ===== PWA INSTALLATION LOGIC v28 =====
+let deferredPrompt = null;
+let isPWAInstalled = false;
+
+// Check if already installed as PWA
+if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+  isPWAInstalled = true;
+  console.log('✅ Running as PWA (standalone mode) - Full screen, no browser UI!');
+  document.documentElement.classList.add('pwa-standalone');
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  console.log('💡 PWA install prompt available');
+  e.preventDefault();
+  deferredPrompt = e;
+  
+  // Show install panel after 3 seconds (if not already installed)
+  if (!isPWAInstalled) {
+    setTimeout(() => {
+      const panel = document.getElementById('pwaInstallPanel');
+      if (panel) {
+        panel.classList.add('show');
+        console.log('📱 Showing PWA install prompt');
+      }
+    }, 3000);
+  }
+});
+
+function installPWA() {
+  if (!deferredPrompt) {
+    console.log('No install prompt available - might be already installed or not supported');
+    // For iOS Safari - show manual instructions
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isIOS && isSafari) {
+      alert('📱 To Install on iPhone/iPad:\n\n1. Tap Share button (square with arrow)\n2. Scroll down → Tap "Add to Home Screen"\n3. Tap "Add"\n\nApp will install full-screen, no browser bar!');
+    } else {
+      alert('📱 To Install:\n\nDesktop/Laptop: Look for Install icon in address bar (⊕ or ⬇️)\nOr Menu → "Install The Travel Desk"\n\nMobile: Menu → "Install app" or "Add to Home Screen"\n\nFull screen app, no refresh button!');
+    }
+    return;
+  }
+  
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then((choiceResult) => {
+    if (choiceResult.outcome === 'accepted') {
+      console.log('✅ User accepted PWA install');
+      const panel = document.getElementById('pwaInstallPanel');
+      if (panel) panel.classList.remove('show');
+    } else {
+      console.log('❌ User dismissed PWA install');
+    }
+    deferredPrompt = null;
+  });
+}
+
+function dismissPWAInstall() {
+  const panel = document.getElementById('pwaInstallPanel');
+  if (panel) panel.classList.remove('show');
+  // Don't show again for 7 days
+  try { localStorage.setItem('rd:pwa-install-dismissed', Date.now().toString()); } catch(e) {}
+}
+
+window.addEventListener('appinstalled', () => {
+  console.log('✅ PWA installed successfully!');
+  isPWAInstalled = true;
+  const panel = document.getElementById('pwaInstallPanel');
+  if (panel) panel.classList.remove('show');
+  // Show success message
+  setTimeout(() => {
+    alert('✅ Travel Desk Installed as App!\n\nFull screen, no browser bar, no refresh button!\nFind it on your Home Screen / Desktop / Start Menu!');
+  }, 500);
+  deferredPrompt = null;
+});
+
+// Service Worker Registration v28
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(registration => {
+        console.log('✅ SW registered v28:', registration.scope);
+        
+        // Check for updates
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('🔄 New PWA version available!');
+              // Optional: Show update prompt
+              if (confirm('🔄 New version available! Update now?')) {
+                newWorker.postMessage({type: 'SKIP_WAITING'});
+                window.location.reload();
+              }
+            }
+          });
+        });
+      })
+      .catch(err => {
+        console.log('❌ SW registration failed:', err);
+      });
+    
+    // Handle controller change (new SW activated)
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
+  });
+}
+
+// Prevent accidental refresh in PWA mode
+if (window.matchMedia('(display-mode: standalone)').matches) {
+  console.log('🚀 PWA Standalone Mode - Preventing accidental refresh');
+  
+  // Prevent pull-to-refresh
+  let startY = 0;
+  document.addEventListener('touchstart', e => {
+    startY = e.touches[0].pageY;
+  }, {passive: false});
+  
+  document.addEventListener('touchmove', e => {
+    const currentY = e.touches[0].pageY;
+    if (currentY > startY && window.scrollY === 0) {
+      e.preventDefault();
+    }
+  }, {passive: false});
+  
+  // Prevent Ctrl+R, F5 in PWA (already blocked, but extra)
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey && e.key === 'r') || e.key === 'F5') {
+      if (isPWAInstalled) {
+        e.preventDefault();
+        console.log('🛡️ Refresh blocked in PWA mode');
+        // Optional: Show custom message
+        const msg = document.createElement('div');
+        msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#065f46;color:white;padding:12px 20px;border-radius:8px;z-index:9999999;font-family:system-ui;';
+        msg.textContent = '🛡️ Refresh disabled in App mode - Use app navigation';
+        document.body.appendChild(msg);
+        setTimeout(() => document.body.removeChild(msg), 2000);
+        return false;
+      }
+    }
+  }, true);
+  
+  // Handle beforeunload - warn before closing (PWA)
+  window.addEventListener('beforeunload', e => {
+    const hasUnsaved = (typeof HOTELS !== 'undefined' && HOTELS.length > 0) ? false : true; // No unsaved if hotels exist
+    // Only warn if there are unsaved changes (not implemented yet)
+    // For now, allow close but backup via beacon (already handled)
+  });
+}
+
+console.log('🚀 PWA v28 - Installable as Web App - Full Screen, No Refresh!');
+</script>
+
+<!-- PWA Install Prompt Panel -->
+<div id="pwaInstallPanel">
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div style="font-size:32px;">🏨</div>
+    <div style="flex:1;">
+      <div style="font-weight:bold;font-size:14px;margin-bottom:2px;">Install Travel Desk as App?</div>
+      <div style="font-size:11px;opacity:0.9;">Full screen • No browser bar • No refresh button • Works offline • Faster!</div>
+    </div>
+    <button onclick="dismissPWAInstall()" style="background:rgba(255,255,255,0.2);border:none;color:white;border-radius:6px;padding:6px 8px;font-size:12px;cursor:pointer;">✕</button>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:10px;">
+    <button onclick="installPWA()" style="flex:1;background:white;color:#065f46;border:none;padding:10px;border-radius:8px;font-weight:bold;font-size:13px;cursor:pointer;">📲 Install App</button>
+    <button onclick="dismissPWAInstall()" style="background:rgba(255,255,255,0.15);color:white;border:none;padding:10px 14px;border-radius:8px;font-size:12px;cursor:pointer;">Later</button>
+  </div>
+  <div style="font-size:9px;opacity:0.7;margin-top:8px;text-align:center;">Desktop: Install icon in address bar • Mobile: Menu → Add to Home Screen</div>
+</div>
+
+<!-- Existing v27 fixes -->
 <script>
 // ===== PROVIDE window.storage if undefined + TAB SYNC =====
 (function() {
   if (typeof window.storage === 'undefined') {
-    console.log('🔧 Creating window.storage fallback v27 with tab sync...');
     const storage = {
       _cache: {},
       async set(key, value, shared) {
         try {
           const sizeKB = value ? Math.round(value.length/1024) : 0;
-          
           if (key === 'rd:auto-backup-full' && sizeKB > 3500) {
-            console.log(`💾 Saving large ${sizeKB}KB to auto-backup-full...`);
             try {
               localStorage.removeItem('rd:auto-sync-backup');
               localStorage.removeItem('rd:quotes-local-backup');
               localStorage.setItem(key, value);
               this._cache[key] = value;
-              // Notify other tabs via storage event (automatic) + BroadcastChannel
-              try {
-                localStorage.setItem('rd:backup-sync-timestamp', Date.now().toString());
-              } catch(e) {}
+              try { localStorage.setItem('rd:backup-sync-timestamp', Date.now().toString()); } catch(e) {}
               return true;
             } catch(e) {
               if (e.name === 'QuotaExceededError') {
-                console.warn(`Quota exceeded for ${key}, trying manual backup`);
-                try {
-                  localStorage.setItem('rd:manual-restore-backup', value);
-                  localStorage.setItem('rd:backup-sync-timestamp', Date.now().toString());
-                } catch(e2) {}
+                try { localStorage.setItem('rd:manual-restore-backup', value); } catch(e2) {}
                 return false;
               }
               throw e;
             }
           }
-          
-          if (key.includes('auto-sync-backup') && sizeKB > 100) {
-            return true;
-          }
-          
+          if (key.includes('auto-sync-backup') && sizeKB > 100) return true;
           localStorage.setItem(key, value);
           this._cache[key] = value;
           try { localStorage.setItem('rd:backup-sync-timestamp', Date.now().toString()); } catch(e) {}
           return true;
         } catch (e) {
-          if (e.name === 'QuotaExceededError' || e.code === 22) {
-            this._cache[key] = value;
-            return false;
-          }
           this._cache[key] = value;
           return false;
         }
@@ -77,44 +297,31 @@
       }
     };
     window.storage = storage;
-    console.log('✅ window.storage v27 with tab sync created');
   }
   
-  // Tab sync via BroadcastChannel + storage event
   try {
     const bc = new BroadcastChannel('rate-desk-sync');
     bc.onmessage = function(e) {
       if (e.data && e.data.type === 'backup-updated') {
-        console.log('📢 Other tab updated backup, reloading if needed...', e.data.hotels);
         const currentHotels = (typeof HOTELS !== 'undefined' ? HOTELS.length : 0);
         if (currentHotels === 0 && e.data.hotels > 0) {
-          console.log('🔄 Current tab has 0 hotels, other tab has ' + e.data.hotels + ', reloading from localStorage...');
           setTimeout(() => location.reload(), 1000);
         }
       }
     };
     window._rateDeskSyncChannel = bc;
-    console.log('✅ BroadcastChannel tab sync enabled');
-  } catch(e) {
-    console.log('BroadcastChannel not supported, using storage event only');
-  }
+  } catch(e) {}
   
-  // Listen to storage events (other tabs saving)
   window.addEventListener('storage', function(e) {
     if (e.key === 'rd:auto-backup-full' || e.key === 'rd:manual-restore-backup' || e.key === 'rd:backup-sync-timestamp') {
-      console.log(`📢 Storage event: ${e.key} changed in other tab`);
       const currentHotels = (typeof HOTELS !== 'undefined' ? HOTELS.length : 0);
       if (currentHotels === 0) {
-        console.log('🔄 Current tab has 0 hotels, other tab saved backup, reloading...');
         setTimeout(() => {
           try {
             const backupStr = localStorage.getItem('rd:auto-backup-full') || localStorage.getItem('rd:manual-restore-backup');
             if (backupStr) {
               const backup = JSON.parse(backupStr);
-              if (backup.hotels && backup.hotels.length > 0) {
-                console.log(`Found ${backup.hotels.length} hotels from other tab, reloading...`);
-                location.reload();
-              }
+              if (backup.hotels && backup.hotels.length > 0) location.reload();
             }
           } catch(e) {}
         }, 1500);
@@ -123,7 +330,6 @@
   });
 })();
 
-// Fix writeFullAutoBackup - with tab sync
 (function() {
   function overrideBackup() {
     if (typeof writeFullAutoBackup !== 'undefined') {
@@ -153,24 +359,17 @@
           const sizeKB = Math.round(jsonStr.length/1024);
           
           if (sizeKB > 500) {
-            console.log(`📦 Large backup ${sizeKB}KB with ${backup.hotels.length} hotels - Save to auto-backup-full + Drive + Tab Sync`);
             try {
               localStorage.removeItem('rd:auto-sync-backup');
               localStorage.setItem('rd:auto-backup-full', jsonStr);
               localStorage.setItem('rd:backup-sync-timestamp', Date.now().toString());
-              // Notify other tabs
               try {
                 if (window._rateDeskSyncChannel) {
                   window._rateDeskSyncChannel.postMessage({type: 'backup-updated', hotels: backup.hotels.length, timestamp: backup.timestamp});
                 }
               } catch(e) {}
-              console.log('✅ Saved to rd:auto-backup-full + notified tabs');
             } catch(e) {
-              console.warn('Failed auto-backup-full:', e.message);
-              try {
-                localStorage.setItem('rd:manual-restore-backup', jsonStr);
-                localStorage.setItem('rd:backup-sync-timestamp', Date.now().toString());
-              } catch(e2) {}
+              try { localStorage.setItem('rd:manual-restore-backup', jsonStr); } catch(e2) {}
             }
             if (backup.hotels.length > 0) {
               if (typeof window.triggerDriveAutoBackup === 'function') {
@@ -186,11 +385,9 @@
           } catch(e) {}
           return backup;
         } catch (e) {
-          console.error('writeFullAutoBackup failed:', e);
           return null;
         }
       };
-      console.log('✅ writeFullAutoBackup v27 with tab sync');
     } else {
       setTimeout(overrideBackup, 500);
     }
@@ -203,12 +400,10 @@
 })();
 
 document.addEventListener('contextmenu', e => { e.preventDefault(); return false; }, true);
-console.log('🚀 v27 tab sync fixes loaded');
 </script>
 
 <script>
 const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
-console.log('☁️ Drive v27 - Tab Sync + Better Error Handling');
 
 let lastDriveBackupTime = 0;
 let driveBackupInProgress = false;
@@ -221,113 +416,76 @@ function jsonpLoadWithRetry(url, cb, retries = 2) {
     attempts++;
     const name = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2,5);
     let timeoutId;
-    
     window[name] = function(data) {
       clearTimeout(timeoutId);
       try { delete window[name]; } catch(e){}
       try { document.body.removeChild(s); } catch(e){}
       cb(data);
     };
-    
     const s = document.createElement('script');
     s.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + name + '&t=' + Date.now() + '&retry=' + attempts;
     s.onerror = function() {
       clearTimeout(timeoutId);
       try { delete window[name]; } catch(e){}
       try { document.body.removeChild(s); } catch(e){}
-      console.warn(`JSONP attempt ${attempts} failed for ${url}`);
-      if (attempts < retries) {
-        console.log(`Retrying JSONP... attempt ${attempts+1}/${retries}`);
-        setTimeout(tryLoad, 2000);
-      } else {
-        cb({error:'fail', retries: attempts});
-      }
+      if (attempts < retries) setTimeout(tryLoad, 2000);
+      else cb({error:'fail', retries: attempts});
     };
-    
     timeoutId = setTimeout(() => {
-      console.warn(`JSONP timeout attempt ${attempts}`);
       try { delete window[name]; } catch(e){}
       try { document.body.removeChild(s); } catch(e){}
-      if (attempts < retries) {
-        setTimeout(tryLoad, 2000);
-      } else {
-        cb({error:'timeout', retries: attempts});
-      }
+      if (attempts < retries) setTimeout(tryLoad, 2000);
+      else cb({error:'timeout', retries: attempts});
     }, 15000);
-    
     document.body.appendChild(s);
   }
   tryLoad();
 }
 
-function createFullBackupV27() {
+function createFullBackup() {
   try {
-    let hotels = (typeof HOTELS !== 'undefined' && Array.isArray(HOTELS)) ? HOTELS : [];
-    let seasons = (typeof SEASONS !== 'undefined' && Array.isArray(SEASONS)) ? SEASONS : [];
-    let groups = (typeof GROUPS !== 'undefined' && Array.isArray(GROUPS)) ? GROUPS : [];
-    let data = (typeof DATA !== 'undefined' && DATA) ? DATA : {cabs: [], boats: [], activities: [], flights: []};
-    let savedQuotes = (typeof SAVED_QUOTES !== 'undefined' && Array.isArray(SAVED_QUOTES)) ? SAVED_QUOTES : [];
-    let enquiries = (typeof ENQUIRIES !== 'undefined' && Array.isArray(ENQUIRIES)) ? ENQUIRIES : [];
-    
-    const backup = {
+    return {
       _type: 'rate-desk-backup',
       _version: 4,
       timestamp: new Date().toISOString(),
-      hotels: hotels,
-      seasons: seasons,
-      groups: groups,
-      cart: (typeof CART !== 'undefined' ? CART : []),
-      services: (typeof SERVICES !== 'undefined' ? SERVICES : []),
-      company: (typeof COMPANY !== 'undefined' ? COMPANY : {}),
-      data: data,
-      savedQuotes: savedQuotes,
-      enquiries: enquiries,
-      destinations: (typeof CUSTOM_DESTINATIONS !== 'undefined' ? CUSTOM_DESTINATIONS : []),
-      itineraries: (typeof ITINERARIES !== 'undefined' ? ITINERARIES : []),
-      packages: (typeof PACKAGES !== 'undefined' ? PACKAGES : [])
+      hotels: typeof HOTELS !== 'undefined' ? HOTELS : [],
+      seasons: typeof SEASONS !== 'undefined' ? SEASONS : [],
+      groups: typeof GROUPS !== 'undefined' ? GROUPS : [],
+      cart: typeof CART !== 'undefined' ? CART : [],
+      services: typeof SERVICES !== 'undefined' ? SERVICES : [],
+      company: typeof COMPANY !== 'undefined' ? COMPANY : {},
+      data: typeof DATA !== 'undefined' ? DATA : {},
+      savedQuotes: typeof SAVED_QUOTES !== 'undefined' ? SAVED_QUOTES : [],
+      enquiries: typeof ENQUIRIES !== 'undefined' ? ENQUIRIES : [],
+      destinations: typeof CUSTOM_DESTINATIONS !== 'undefined' ? CUSTOM_DESTINATIONS : [],
+      itineraries: typeof ITINERARIES !== 'undefined' ? ITINERARIES : [],
+      packages: typeof PACKAGES !== 'undefined' ? PACKAGES : []
     };
-    return backup;
-  } catch(e) {
-    return null;
-  }
+  } catch(e) { return null; }
 }
 
-function downloadBackupLocallyV27(backup) {
+function downloadBackupLocally(backup) {
   try {
     const jsonStr = JSON.stringify(backup, null, 2);
     const blob = new Blob([jsonStr], {type: 'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const stamp = new Date().toISOString().slice(0,10);
     a.href = url;
-    a.download = `rate-desk-backup-${stamp}-${backup.hotels.length}hotels.json`;
+    a.download = `rate-desk-backup-${new Date().toISOString().slice(0,10)}-${backup.hotels.length}hotels.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url), 60000);
     return true;
-  } catch(e) {
-    return false;
-  }
+  } catch(e) { return false; }
 }
 
-async function directRestoreFromBackupV27(backup) {
+async function directRestoreFromBackup(backup) {
   try {
-    console.log(`🔄 Direct restore v27: ${backup.hotels.length} hotels`);
-    
-    if (!backup || !Array.isArray(backup.hotels)) {
-      throw new Error('Invalid backup');
-    }
-    
-    if (typeof HOTELS !== 'undefined') HOTELS = backup.hotels || [];
-    else window.HOTELS = backup.hotels || [];
-    
-    if (typeof GROUPS !== 'undefined') GROUPS = backup.groups || [];
-    else window.GROUPS = backup.groups || [];
-    
-    if (typeof SEASONS !== 'undefined') SEASONS = backup.seasons || [];
-    else window.SEASONS = backup.seasons || [];
-    
+    if (!backup || !Array.isArray(backup.hotels)) throw new Error('Invalid backup');
+    if (typeof HOTELS !== 'undefined') HOTELS = backup.hotels || []; else window.HOTELS = backup.hotels || [];
+    if (typeof GROUPS !== 'undefined') GROUPS = backup.groups || []; else window.GROUPS = backup.groups || [];
+    if (typeof SEASONS !== 'undefined') SEASONS = backup.seasons || []; else window.SEASONS = backup.seasons || [];
     const backupData = backup.data || {};
     const newData = {
       cabs: backupData.cabs || backup.cabs || [],
@@ -335,146 +493,71 @@ async function directRestoreFromBackupV27(backup) {
       activities: backupData.activities || backup.activities || [],
       flights: backupData.flights || backup.flights || []
     };
-    
-    if (typeof DATA !== 'undefined') DATA = newData;
-    else window.DATA = newData;
-    
-    let quotes = [];
-    if (backup.savedQuotes && Array.isArray(backup.savedQuotes)) quotes = backup.savedQuotes;
-    else if (backup.quotes && Array.isArray(backup.quotes)) quotes = backup.quotes;
-    
-    if (typeof SAVED_QUOTES !== 'undefined') SAVED_QUOTES = quotes;
-    else window.SAVED_QUOTES = quotes;
-    
-    if (typeof ENQUIRIES !== 'undefined') ENQUIRIES = backup.enquiries || [];
-    else window.ENQUIRIES = backup.enquiries || [];
-    
-    if (typeof CUSTOM_DESTINATIONS !== 'undefined') CUSTOM_DESTINATIONS = backup.destinations || [];
-    else window.CUSTOM_DESTINATIONS = backup.destinations || [];
-    
-    if (typeof ITINERARIES !== 'undefined') ITINERARIES = backup.itineraries || [];
-    else window.ITINERARIES = backup.itineraries || [];
-    
-    if (typeof PACKAGES !== 'undefined') PACKAGES = backup.packages || [];
-    else window.PACKAGES = backup.packages || [];
-    
-    if (typeof COMPANY !== 'undefined') COMPANY = backup.company || {};
-    else window.COMPANY = backup.company || {};
-    
-    if (typeof CART !== 'undefined') CART = backup.cart || [];
-    else window.CART = backup.cart || [];
-    
-    if (typeof SERVICES !== 'undefined') SERVICES = backup.services || [];
-    else window.SERVICES = backup.services || [];
-    
+    if (typeof DATA !== 'undefined') DATA = newData; else window.DATA = newData;
+    let quotes = backup.savedQuotes || backup.quotes || [];
+    if (typeof SAVED_QUOTES !== 'undefined') SAVED_QUOTES = quotes; else window.SAVED_QUOTES = quotes;
+    if (typeof ENQUIRIES !== 'undefined') ENQUIRIES = backup.enquiries || []; else window.ENQUIRIES = backup.enquiries || [];
+    if (typeof CUSTOM_DESTINATIONS !== 'undefined') CUSTOM_DESTINATIONS = backup.destinations || []; else window.CUSTOM_DESTINATIONS = backup.destinations || [];
+    if (typeof ITINERARIES !== 'undefined') ITINERARIES = backup.itineraries || []; else window.ITINERARIES = backup.itineraries || [];
+    if (typeof PACKAGES !== 'undefined') PACKAGES = backup.packages || []; else window.PACKAGES = backup.packages || [];
+    if (typeof COMPANY !== 'undefined') COMPANY = backup.company || {}; else window.COMPANY = backup.company || {};
+    if (typeof CART !== 'undefined') CART = backup.cart || []; else window.CART = backup.cart || [];
+    if (typeof SERVICES !== 'undefined') SERVICES = backup.services || []; else window.SERVICES = backup.services || [];
     if (backup.tracker || backup.bookingTracker) {
-      try {
-        if (typeof restoreBookingTrackerBackup === 'function') {
-          restoreBookingTrackerBackup(backup.tracker || backup.bookingTracker);
-        }
-      } catch(e) {}
+      try { if (typeof restoreBookingTrackerBackup === 'function') restoreBookingTrackerBackup(backup.tracker || backup.bookingTracker); } catch(e) {}
     }
-    
-    console.log('✅ Globals set, saving to auto-backup-full + tab sync...');
-    
     const fullBackupJson = JSON.stringify(backup);
-    
     try {
       localStorage.removeItem('rd:auto-sync-backup');
       localStorage.setItem('rd:auto-backup-full', fullBackupJson);
       localStorage.setItem('rd:backup-sync-timestamp', Date.now().toString());
-      // Notify other tabs
-      try {
-        if (window._rateDeskSyncChannel) {
-          window._rateDeskSyncChannel.postMessage({type: 'backup-updated', hotels: backup.hotels.length, timestamp: backup.timestamp});
-        }
-      } catch(e) {}
-      console.log('✅ Saved to auto-backup-full + tab sync');
+      try { if (window._rateDeskSyncChannel) window._rateDeskSyncChannel.postMessage({type: 'backup-updated', hotels: backup.hotels.length, timestamp: backup.timestamp}); } catch(e) {}
     } catch(e) {
-      console.warn('Failed auto-backup-full:', e.message);
-      try {
-        localStorage.setItem('rd:manual-restore-backup', fullBackupJson);
-      } catch(e2) {}
+      try { localStorage.setItem('rd:manual-restore-backup', fullBackupJson); } catch(e2) {}
     }
-    
     const savePromises = [];
     if (typeof saveHotels === 'function') savePromises.push(saveHotels().catch(e => {}));
     else { try { if (window.storage) await window.storage.set('rd:hotel_profiles', JSON.stringify(HOTELS), false); } catch(e) {} }
     if (typeof saveGroups === 'function') savePromises.push(saveGroups().catch(e => {}));
     if (typeof saveSeasons === 'function') savePromises.push(saveSeasons().catch(e => {}));
     const cats = ['cabs', 'boats', 'activities', 'flights'];
-    for (const cat of cats) {
-      if (typeof saveCat === 'function') savePromises.push(saveCat(cat).catch(e => {}));
-    }
+    for (const cat of cats) { if (typeof saveCat === 'function') savePromises.push(saveCat(cat).catch(e => {})); }
     if (typeof saveQuotes === 'function') savePromises.push(saveQuotes().catch(e => {}));
     if (typeof saveEnquiries === 'function') savePromises.push(saveEnquiries().catch(e => {}));
     if (typeof saveDestinations === 'function') savePromises.push(saveDestinations().catch(e => {}));
     if (typeof saveItineraries === 'function') savePromises.push(saveItineraries().catch(e => {}));
     if (typeof saveCompany === 'function') savePromises.push(saveCompany().catch(e => {}));
     if (typeof savePackages === 'function') savePromises.push(savePackages().catch(e => {}));
-    
     await Promise.all(savePromises);
-    console.log('✅ All saved');
-    
-    if (typeof render === 'function') {
-      try { render(); } catch(e) {}
-    }
-    
+    if (typeof render === 'function') { try { render(); } catch(e) {} }
     return true;
-    
-  } catch(e) {
-    console.error('Direct restore v27 failed:', e);
-    throw e;
-  }
+  } catch(e) { throw e; }
 }
 
-async function backupToDriveV27Core(backup, jsonStr, isAuto = false) {
-  if (driveBackupInProgress) {
-    pendingDriveBackup = {backup, jsonStr, isAuto};
-    return false;
-  }
-  
+async function backupToDriveCore(backup, jsonStr, isAuto = false) {
+  if (driveBackupInProgress) { pendingDriveBackup = {backup, jsonStr, isAuto}; return false; }
   driveBackupInProgress = true;
   const statusEl = document.getElementById('restoreStatusText');
   const autoStatusEl = document.getElementById('autoBackupStatus');
-  
   try {
-    if (!backup) {
-      backup = createFullBackupV27();
-      if (!backup) {
-        driveBackupInProgress = false;
-        return false;
-      }
-      jsonStr = JSON.stringify(backup);
-    }
-    
+    if (!backup) { backup = createFullBackup(); if (!backup) { driveBackupInProgress = false; return false; } jsonStr = JSON.stringify(backup); }
     const hotelsCount = backup.hotels.length;
     const sizeMB = (jsonStr.length / 1024 / 1024).toFixed(2);
-    
     if (hotelsCount === 0) {
-      console.log(`🛡️ PROTECTION: 0 hotels BLOCKED! Last good: ${lastGoodHotelsCount}`);
       if (statusEl) statusEl.textContent = `🛡️ Protected: 0 hotels`;
-      if (autoStatusEl) autoStatusEl.textContent = `🛡️ Protected - 0 hotels, Drive has ${lastGoodHotelsCount}`;
+      if (autoStatusEl) autoStatusEl.textContent = `🛡️ Protected - 0 hotels`;
       driveBackupInProgress = false;
       return false;
     }
-    
-    if (hotelsCount > 0) {
-      lastGoodHotelsCount = hotelsCount;
-      try { localStorage.setItem('rd:last-good-hotels-count', hotelsCount.toString()); } catch(e){}
-    }
-    
+    if (hotelsCount > 0) { lastGoodHotelsCount = hotelsCount; try { localStorage.setItem('rd:last-good-hotels-count', hotelsCount.toString()); } catch(e){} }
     const now = Date.now();
     if (isAuto && (now - lastDriveBackupTime) < 180000) {
       if (autoStatusEl) autoStatusEl.textContent = `⏱️ Throttled ${Math.round((now-lastDriveBackupTime)/1000)}s ago`;
       driveBackupInProgress = false;
       return false;
     }
-    
-    console.log(`${isAuto ? '🔄 AUTO' : '☁️ MANUAL'} Backing up ${hotelsCount} hotels (${sizeMB} MB)...`);
     if (statusEl) statusEl.textContent = `${isAuto ? '🔄 Auto' : '🔄'} ${hotelsCount} hotels...`;
     if (autoStatusEl) autoStatusEl.textContent = `${isAuto ? '🔄 Auto' : '🔄'} ${hotelsCount} hotels (${sizeMB} MB)...`;
-    
     let driveSuccess = false;
     try {
       const controller = new AbortController();
@@ -483,70 +566,48 @@ async function backupToDriveV27Core(backup, jsonStr, isAuto = false) {
       clearTimeout(timeoutId);
       driveSuccess = true;
       lastDriveBackupTime = Date.now();
-      console.log(`✅ ${isAuto ? 'AUTO' : 'MANUAL'} Drive SUCCESS - ${hotelsCount} hotels`);
-    } catch(e) {
-      if (hotelsCount > 0) {
-        driveSuccess = true;
-        lastDriveBackupTime = Date.now();
-      }
-    }
-    
+    } catch(e) { if (hotelsCount > 0) { driveSuccess = true; lastDriveBackupTime = Date.now(); } }
     if (driveSuccess) {
       if (statusEl) statusEl.textContent = `✅ ${hotelsCount} hotels to Drive`;
       if (autoStatusEl) autoStatusEl.textContent = `✅ Auto ${new Date().toLocaleTimeString()} - ${hotelsCount} hotels to Drive`;
-      if (!isAuto) {
-        downloadBackupLocallyV27(backup);
-        alert(`✅ Backed up ${hotelsCount} hotels (${sizeMB} MB)!`);
-      }
+      if (!isAuto) { downloadBackupLocally(backup); alert(`✅ Backed up ${hotelsCount} hotels (${sizeMB} MB)!`); }
     }
-    
     driveBackupInProgress = false;
     if (pendingDriveBackup) {
       const pending = pendingDriveBackup;
       pendingDriveBackup = null;
-      setTimeout(() => backupToDriveV27Core(pending.backup, pending.jsonStr, pending.isAuto), 2000);
+      setTimeout(() => backupToDriveCore(pending.backup, pending.jsonStr, pending.isAuto), 2000);
     }
-    
     return driveSuccess;
-    
-  } catch(e) {
-    driveBackupInProgress = false;
-    return false;
-  }
+  } catch(e) { driveBackupInProgress = false; return false; }
 }
 
-function backupToDriveV27() {
-  const backup = createFullBackupV27();
+function backupToDrive() {
+  const backup = createFullBackup();
   if (!backup) { alert('❌ No data!'); return false; }
-  if (backup.hotels.length === 0) {
-    const confirmZero = confirm(`⚠️ Hotels 0! Overwrite Drive (${lastGoodHotelsCount} hotels) with 0?`);
-    if (!confirmZero) return false;
-  }
+  if (backup.hotels.length === 0) { const c = confirm(`⚠️ Hotels 0! Overwrite Drive (${lastGoodHotelsCount} hotels) with 0?`); if (!c) return false; }
   const jsonStr = JSON.stringify(backup);
-  return backupToDriveV27Core(backup, jsonStr, false);
+  return backupToDriveCore(backup, jsonStr, false);
 }
 
-function autoBackupToDriveV27() {
-  const backup = createFullBackupV27();
-  if (!backup || backup.hotels.length === 0) {
-    console.log(`🛡️ Auto BLOCKED - 0 hotels, protecting ${lastGoodHotelsCount}`);
-    return false;
-  }
+function autoBackupToDrive() {
+  const backup = createFullBackup();
+  if (!backup || backup.hotels.length === 0) return false;
   const jsonStr = JSON.stringify(backup);
-  return backupToDriveV27Core(backup, jsonStr, true);
+  return backupToDriveCore(backup, jsonStr, true);
 }
 
 window.triggerDriveAutoBackup = function(backup, jsonStr) {
-  if (!backup) backup = createFullBackupV27();
+  if (!backup) backup = createFullBackup();
   if (!backup || backup.hotels.length === 0) return;
   if (window._driveAutoBackupTimeout) clearTimeout(window._driveAutoBackupTimeout);
   window._driveAutoBackupTimeout = setTimeout(() => {
     if (!jsonStr) jsonStr = JSON.stringify(backup);
-    backupToDriveV27Core(backup, jsonStr, true);
+    backupToDriveCore(backup, jsonStr, true);
   }, 5000);
 };
 
-async function restoreFromDriveV27(showPopup=true) {
+async function restoreFromDrive(showPopup=true) {
   return new Promise((resolve) => {
     try {
       const el = document.getElementById('restoreStatusText');
@@ -554,232 +615,156 @@ async function restoreFromDriveV27(showPopup=true) {
       if (el) el.textContent = '🔄 Restoring from Drive...';
       if (autoEl) autoEl.textContent = '🔄 Restoring from Drive...';
       
-      // First check localStorage (from other tabs)
       try {
         const localBackupStr = localStorage.getItem('rd:auto-backup-full') || localStorage.getItem('rd:manual-restore-backup');
         if (localBackupStr) {
           const localBackup = JSON.parse(localBackupStr);
-          if (localBackup.hotels && localBackup.hotels.length > 0) {
-            console.log(`📦 Found ${localBackup.hotels.length} hotels in localStorage (from other tab), using that first`);
-            if (localBackup.hotels.length >= 73) {
-              // Use local if it has data, faster than Drive
-              (async () => {
-                try {
-                  await directRestoreFromBackupV27(localBackup);
-                  if (el) el.textContent = `✅ ${localBackup.hotels.length} hotels from localStorage!`;
-                  if (autoEl) autoEl.textContent = `✅ ${localBackup.hotels.length} hotels from local tab sync!`;
-                  lastGoodHotelsCount = localBackup.hotels.length;
-                  if (showPopup) {
-                    alert(`✅ Restored ${localBackup.hotels.length} hotels from other tab! Reloading...`);
-                    setTimeout(()=> location.reload(), 1500);
-                  }
-                  resolve(true);
-                  return;
-                } catch(e) {
-                  console.warn('Local restore failed, trying Drive:', e);
-                  // Fall through to Drive
-                }
-              })();
-              // Don't return, let Drive try in parallel if local fails
-            }
+          if (localBackup.hotels && localBackup.hotels.length > 0 && localBackup.hotels.length >= 73) {
+            (async () => {
+              try {
+                await directRestoreFromBackup(localBackup);
+                if (el) el.textContent = `✅ ${localBackup.hotels.length} hotels from localStorage!`;
+                if (autoEl) autoEl.textContent = `✅ ${localBackup.hotels.length} hotels from local tab sync!`;
+                lastGoodHotelsCount = localBackup.hotels.length;
+                if (showPopup) { alert(`✅ Restored ${localBackup.hotels.length} hotels from other tab! Reloading...`); setTimeout(()=> location.reload(), 1500); }
+                resolve(true);
+                return;
+              } catch(e) {}
+            })();
           }
         }
-      } catch(e) {
-        console.warn('LocalStorage check failed:', e);
-      }
+      } catch(e) {}
       
       jsonpLoadWithRetry(DRIVE_BACKUP_URL + '?action=load', async function(backup) {
         if (!backup || backup.error) {
-          console.error('Drive load failed:', backup);
           if (el) el.textContent = '❌ Drive failed - Check localStorage or import file';
           if (autoEl) autoEl.textContent = '❌ Drive failed - Use BACKUP tab > Import';
-          
-          // Try localStorage fallback again
           try {
             const fallbackStr = localStorage.getItem('rd:auto-backup-full') || localStorage.getItem('rd:manual-restore-backup');
             if (fallbackStr) {
               const fallback = JSON.parse(fallbackStr);
               if (fallback.hotels && fallback.hotels.length > 0) {
-                console.log(`Using localStorage fallback with ${fallback.hotels.length} hotels`);
-                await directRestoreFromBackupV27(fallback);
+                await directRestoreFromBackup(fallback);
                 if (el) el.textContent = `✅ ${fallback.hotels.length} hotels from local fallback!`;
                 lastGoodHotelsCount = fallback.hotels.length;
-                if (showPopup) {
-                  alert(`✅ Restored ${fallback.hotels.length} hotels from local backup! (Drive failed) Reloading...`);
-                  setTimeout(()=> location.reload(), 1500);
-                }
+                if (showPopup) { alert(`✅ Restored ${fallback.hotels.length} hotels from local backup! (Drive failed) Reloading...`); setTimeout(()=> location.reload(), 1500); }
                 resolve(true);
                 return;
               }
             }
           } catch(e) {}
-          
-          if (showPopup) {
-            alert('❌ Drive error!\n\nTry:\n1. BACKUP tab > Import old file: rate-desk-backup-2026-11-02.json\n2. Or check if Drive file exists: drive.google.com > TheTravelDesk_AutoBackup.json\n3. Or open original tab with 73 hotels and click BACKUP TO DRIVE');
-          }
+          if (showPopup) alert('❌ Drive error!\n\nTry:\n1. BACKUP tab > Import old file: rate-desk-backup-2026-11-02.json\n2. Or check Drive: drive.google.com > TheTravelDesk_AutoBackup.json');
           resolve(false);
           return;
         }
-        
         if (!backup.hotels || backup.hotels.length === 0) {
           if (el) el.textContent = '❌ Drive 0 hotels - Import file!';
-          if (autoEl) autoEl.textContent = '❌ Drive 0 hotels - Version history or import';
           if (showPopup) alert('❌ Drive 0 hotels!\nRecovery:\n1. Drive > Version History > Restore 73 hotels\n2. Or old file: rate-desk-backup-2026-11-02.json');
           resolve(false);
           return;
         }
-        
         const hotelsCount = backup.hotels.length;
-        console.log(`📦 Drive has ${hotelsCount} hotels, restoring...`);
-        
         try {
-          await directRestoreFromBackupV27(backup);
-          
+          await directRestoreFromBackup(backup);
           if (el) el.textContent = `✅ ${hotelsCount} hotels from Drive!`;
           if (autoEl) autoEl.textContent = `✅ ${hotelsCount} hotels from Drive @ ${new Date().toLocaleTimeString()}`;
           lastGoodHotelsCount = hotelsCount;
           try { localStorage.setItem('rd:last-good-hotels-count', hotelsCount.toString()); } catch(e){}
-          
-          if (showPopup) {
-            alert(`✅ Restored ${hotelsCount} hotels from Drive! Reloading...`);
-            setTimeout(()=> location.reload(), 1500);
-          } else {
-            // Auto restore without popup - reload silently
-            setTimeout(()=> location.reload(), 1500);
-          }
-          
+          if (showPopup) { alert(`✅ Restored ${hotelsCount} hotels from Drive! Reloading...`); setTimeout(()=> location.reload(), 1500); }
+          else { setTimeout(()=> location.reload(), 1500); }
           resolve(true);
-          
         } catch(e) {
-          console.error('Restore failed:', e);
           alert(`❌ Restore failed: ${e.message}\nTry BACKUP tab > Import file`);
           resolve(false);
         }
-      }, 3); // Retry 3 times
-    } catch(e) {
-      resolve(false);
-    }
+      }, 3);
+    } catch(e) { resolve(false); }
   });
 }
 
 window.addEventListener('load', function() {
   setTimeout(function() {
     try {
-      try {
-        const saved = localStorage.getItem('rd:last-good-hotels-count');
-        if (saved) lastGoodHotelsCount = parseInt(saved) || 0;
-      } catch(e){}
-      
+      try { const saved = localStorage.getItem('rd:last-good-hotels-count'); if (saved) lastGoodHotelsCount = parseInt(saved) || 0; } catch(e){}
       const hasHotels = (typeof HOTELS !== 'undefined' && HOTELS.length > 0);
-      console.log(`Hotels on load: ${hasHotels ? HOTELS.length : 0}, Last good: ${lastGoodHotelsCount}`);
-      
       if (!hasHotels) {
-        console.log('No hotels, checking localStorage first (from other tabs)...');
         try {
           const localStr = localStorage.getItem('rd:auto-backup-full') || localStorage.getItem('rd:manual-restore-backup');
           if (localStr) {
             const localBackup = JSON.parse(localStr);
             if (localBackup.hotels && localBackup.hotels.length > 0) {
-              console.log(`Found ${localBackup.hotels.length} hotels in localStorage, restoring...`);
               (async () => {
                 try {
-                  await directRestoreFromBackupV27(localBackup);
+                  await directRestoreFromBackup(localBackup);
                   const el = document.getElementById('restoreStatusText');
                   if (el) el.textContent = `✅ ${localBackup.hotels.length} hotels from localStorage!`;
                   setTimeout(()=> location.reload(), 1500);
-                } catch(e) {
-                  console.warn('Local restore failed, trying Drive:', e);
-                  setTimeout(() => restoreFromDriveV27(false), 1000);
-                }
+                } catch(e) { setTimeout(() => restoreFromDrive(false), 1000); }
               })();
               return;
             }
           }
         } catch(e) {}
-        
-        console.log('No local backup, trying Drive...');
-        setTimeout(() => restoreFromDriveV27(false), 2000);
+        setTimeout(() => restoreFromDrive(false), 2000);
       } else {
         lastGoodHotelsCount = HOTELS.length;
         try { localStorage.setItem('rd:last-good-hotels-count', HOTELS.length.toString()); } catch(e){}
-        // Notify other tabs
-        try {
-          if (window._rateDeskSyncChannel) {
-            window._rateDeskSyncChannel.postMessage({type: 'backup-updated', hotels: HOTELS.length, timestamp: new Date().toISOString()});
-          }
-        } catch(e) {}
-        setTimeout(() => autoBackupToDriveV27(), 15000);
+        try { if (window._rateDeskSyncChannel) window._rateDeskSyncChannel.postMessage({type: 'backup-updated', hotels: HOTELS.length, timestamp: new Date().toISOString()}); } catch(e) {}
+        setTimeout(() => autoBackupToDrive(), 15000);
       }
-      
-      setInterval(() => autoBackupToDriveV27(), 5 * 60 * 1000);
-      
+      setInterval(() => autoBackupToDrive(), 5 * 60 * 1000);
       document.addEventListener('visibilitychange', function() {
         if (!document.hidden) {
           const now = Date.now();
-          if (now - lastDriveBackupTime > 5 * 60 * 1000) {
-            setTimeout(() => autoBackupToDriveV27(), 5000);
-          }
+          if (now - lastDriveBackupTime > 5 * 60 * 1000) setTimeout(() => autoBackupToDrive(), 5000);
         }
       });
-      
-    } catch(e){ console.log('Load error:', e); }
+    } catch(e){}
   }, 2500);
 });
 
-window.addEventListener('pagehide', function() { autoBackupToDriveV27(); });
+window.addEventListener('pagehide', function() { autoBackupToDrive(); });
 window.addEventListener('beforeunload', function() {
   try {
-    const backup = createFullBackupV27();
+    const backup = createFullBackup();
     if (backup && backup.hotels.length > 0) {
       const jsonStr = JSON.stringify(backup);
       if (navigator.sendBeacon) {
         const blob = new Blob([jsonStr], {type: 'text/plain'});
         navigator.sendBeacon(DRIVE_BACKUP_URL, blob);
-        console.log('✅ Beacon backup on close - ' + backup.hotels.length + ' hotels');
       }
     }
   } catch(e) {}
 });
 
-window.backupToDrive = backupToDriveV27;
-window.backupToDriveV27 = backupToDriveV27;
-window.autoBackupToDrive = autoBackupToDriveV27;
-window.restoreFromDrive = restoreFromDriveV27;
-window.restoreFromDriveV27 = restoreFromDriveV27;
-window.directRestore = directRestoreFromBackupV27;
-window.downloadBackup = function() {
-  const backup = createFullBackupV27();
-  if (backup) {
-    downloadBackupLocallyV27(backup);
-    alert(`✅ Downloaded ${backup.hotels.length} hotels!`);
-  }
-};
+window.backupToDrive = backupToDrive;
+window.restoreFromDrive = restoreFromDrive;
+window.downloadBackup = function() { const b = createFullBackup(); if (b) { downloadBackupLocally(b); alert(`✅ Downloaded ${b.hotels.length} hotels!`); } };
 window.checkStorage = function() {
   if (navigator.storage && navigator.storage.estimate) {
     navigator.storage.estimate().then(est => {
-      const tabsInfo = `Tabs sync via localStorage + BroadcastChannel`;
-      alert(`📊 Storage:\nUsed: ${(est.usage/1024/1024).toFixed(2)} MB\nQuota: ${(est.quota/1024/1024).toFixed(2)} MB\n${Math.round(est.usage/est.quota*100)}%\n\nLast good: ${lastGoodHotelsCount} hotels\n${tabsInfo}\n\nFor new tab: Auto checks localStorage first (from other tabs) then Drive`);
+      alert(`📊 Storage:\nUsed: ${(est.usage/1024/1024).toFixed(2)} MB\nQuota: ${(est.quota/1024/1024).toFixed(2)} MB\nLast good: ${lastGoodHotelsCount} hotels\nPWA: ${window.matchMedia('(display-mode: standalone)').matches ? 'Installed (Full Screen)' : 'Browser (Install as App for full screen)'}`);
     });
   }
 };
 
-console.log('✅ v27 Tab Sync + Drive Retry - New tab will check localStorage from other tabs first');
+console.log('✅ v28 PWA Installable + Tab Sync');
 </script>
 
 <div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:3px solid #065f46;border-radius:12px;padding:10px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-    <span style="font-weight:bold;font-size:11px;color:#065f46;">☁️ v27 Tab Sync Fixed</span>
+    <span style="font-weight:bold;font-size:11px;color:#065f46;">☁️ v28 PWA Installable</span>
     <span id="restoreStatusText" style="font-size:10px;color:#065f46;font-weight:bold;">Ready</span>
   </div>
   <div style="display:flex;gap:4px;margin-bottom:4px;">
-    <button onclick="restoreFromDriveV27(true)" style="flex:1;background:#065f46;color:white;border:none;padding:8px;border-radius:6px;font-size:10px;font-weight:bold;">🔄 RESTORE 73</button>
-    <button onclick="backupToDriveV27()" style="flex:2;background:#f59e0b;color:white;border:none;padding:10px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">☁️ BACKUP TO DRIVE + DOWNLOAD</button>
+    <button onclick="restoreFromDrive(true)" style="flex:1;background:#065f46;color:white;border:none;padding:8px;border-radius:6px;font-size:10px;font-weight:bold;">🔄 RESTORE 73</button>
+    <button onclick="backupToDrive()" style="flex:2;background:#f59e0b;color:white;border:none;padding:10px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">☁️ BACKUP TO DRIVE + DOWNLOAD</button>
     <button onclick="document.getElementById('mobileRestorePanel').style.display='none'" style="background:#eee;border:none;border-radius:6px;padding:6px 8px;font-size:10px;">✕</button>
   </div>
-  <div id="autoBackupStatus" style="font-size:9px;color:#065f46;text-align:center;background:#e8f5e9;padding:3px;border-radius:4px;">✅ New Tab: Checks localStorage from other tabs first → Then Drive | Retry 3x | 1500 Hotels OK!</div>
+  <div id="autoBackupStatus" style="font-size:9px;color:#065f46;text-align:center;background:#e8f5e9;padding:3px;border-radius:4px;">📲 Install as App: Desktop→Address Bar ⊕ | Mobile→Menu→Add to Home Screen | Full Screen, No Refresh!</div>
 </div>
 
-<!-- END v27 -->
+<!-- END v28 PWA -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
