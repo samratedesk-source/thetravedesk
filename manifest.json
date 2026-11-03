@@ -1,9 +1,9 @@
 {
-  "name": "The Travel Desk - Travel Masters",
+  "name": "Travel Desk",
   "short_name": "Travel Desk",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8f6f0",
+  "background_color": "#065f46",
   "theme_color": "#065f46",
   "icons": [
     {
@@ -21,6 +21,12 @@
     {
       "src": "icon-180.png",
       "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-1024.png",
+      "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any"
     }
