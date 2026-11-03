@@ -1,72 +1,28 @@
 {
   "name": "The Travel Desk - Travel Masters",
   "short_name": "Travel Desk",
-  "description": "Hotel \u2022 Cab \u2022 Boat \u2022 Activity - B2B masters, quoted in minutes",
   "start_url": "/",
   "display": "standalone",
-  "display_override": [
-    "window-controls-overlay",
-    "standalone",
-    "browser"
-  ],
   "background_color": "#f8f6f0",
   "theme_color": "#065f46",
-  "orientation": "any",
-  "scope": "/",
-  "lang": "en",
-  "categories": [
-    "travel",
-    "business",
-    "productivity"
-  ],
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23065f46'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='60' fill='white'>\ud83c\udfe8</text></svg>",
+      "src": "icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23065f46'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='60' fill='white'>\ud83c\udfe8</text></svg>",
+      "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
-    }
-  ],
-  "shortcuts": [
-    {
-      "name": "Add Hotel",
-      "short_name": "Hotel",
-      "description": "Add new hotel rate",
-      "url": "/?action=add-hotel",
-      "icons": [
-        {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text x='50%' y='50%' font-size='60'>\ud83c\udfe8</text></svg>",
-          "sizes": "96x96"
-        }
-      ]
     },
     {
-      "name": "Backup",
-      "short_name": "Backup",
-      "description": "Backup to Drive",
-      "url": "/?action=backup",
-      "icons": [
-        {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text x='50%' y='50%' font-size='60'>\u2601\ufe0f</text></svg>",
-          "sizes": "96x96"
-        }
-      ]
+      "src": "icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
-  ],
-  "edge_side_panel": {
-    "preferred_width": 400
-  },
-  "launch_handler": {
-    "client_mode": [
-      "navigate-existing",
-      "auto"
-    ]
-  },
-  "handle_links": "preferred"
+  ]
 }
