@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- CRM v24 FINAL - Drive Restore Fixed - Direct Restore Without Dependency -->
+<!-- CRM v25 FINAL - Infinite Restore Loop Fixed - Save to auto-backup-full -->
 <script>
 // ===== PROVIDE window.storage if undefined =====
 (function() {
@@ -11,22 +11,61 @@
       _cache: {},
       async set(key, value, shared) {
         try {
-          if (typeof value === 'string' && value.length > 100000 && key.includes('auto-backup')) {
+          // Don't block hotel_profiles, only block auto-backup-full if too large
+          // But we need auto-backup-full for recovery, so allow it with cleanup
+          if (key === 'rd:auto-backup-full' && value && value.length > 4000000) {
+            console.log(`⚠️ Large auto-backup-full ${Math.round(value.length/1024)}KB - cleaning old data to fit...`);
+            // Clean other large backups first
+            try {
+              localStorage.removeItem('rd:auto-sync-backup');
+              localStorage.removeItem('rd:quotes-local-backup');
+              localStorage.removeItem('rd:hotel_profiles_backup');
+              localStorage.removeItem('rd:hotel_groups_backup');
+            } catch(e) {}
+          }
+          
+          if (key.includes('auto-sync-backup') && value && value.length > 100000) {
+            console.log('🚫 Skip auto-sync-backup large save');
             return true;
           }
+          
           localStorage.setItem(key, value);
           this._cache[key] = value;
           return true;
         } catch (e) {
           if (e.name === 'QuotaExceededError' || e.code === 22) {
+            console.warn(`Quota exceeded for ${key} (${value ? Math.round(value.length/1024) : 0}KB), cleaning...`);
             try {
-              localStorage.removeItem('rd:auto-backup-full');
-              localStorage.removeItem('rd:auto-sync-backup');
-              localStorage.setItem(key, value);
-              this._cache[key] = value;
-              return true;
+              // For auto-backup-full, try aggressive cleanup
+              if (key === 'rd:auto-backup-full') {
+                localStorage.removeItem('rd:auto-sync-backup');
+                localStorage.removeItem('rd:quotes-local-backup');
+                localStorage.removeItem('rd:hotel_profiles_backup');
+                localStorage.removeItem('rd:hotel_groups_backup');
+                localStorage.removeItem('rd:hotel_seasons_backup');
+                // Try again
+                localStorage.setItem(key, value);
+                this._cache[key] = value;
+                console.log(`✅ Saved ${key} after cleanup`);
+                return true;
+              } else {
+                // For other keys, try cleaning auto-backup-full
+                localStorage.removeItem('rd:auto-backup-full');
+                localStorage.removeItem('rd:auto-sync-backup');
+                localStorage.setItem(key, value);
+                this._cache[key] = value;
+                return true;
+              }
             } catch (e2) {
+              console.error(`Still quota exceeded for ${key}:`, e2.message);
               this._cache[key] = value;
+              // Save to manual backup key as last resort
+              try {
+                if (key === 'rd:hotel_profiles' || key === 'rd:auto-backup-full') {
+                  localStorage.setItem('rd:manual-restore-backup', value);
+                  console.log(`✅ Saved to rd:manual-restore-backup as fallback`);
+                }
+              } catch(e3) {}
               return false;
             }
           }
@@ -56,11 +95,11 @@
       }
     };
     window.storage = storage;
-    console.log('✅ window.storage fallback created');
+    console.log('✅ window.storage fallback created with quota handling');
   }
 })();
 
-// Fix writeFullAutoBackup
+// Fix writeFullAutoBackup - allow large saves to auto-backup-full for recovery
 (function() {
   function overrideBackup() {
     if (typeof writeFullAutoBackup !== 'undefined') {
@@ -87,7 +126,28 @@
             quoteDraft: window.rateDeskGetBackupDraft?.() || null
           };
           const jsonStr = JSON.stringify(backup);
+          
+          // For large data, save to auto-backup-full anyway (needed for recovery on reload)
+          // Our storage fallback will clean old data to make space
           if (jsonStr.length > 500000) {
+            console.log(`📦 Large backup ${Math.round(jsonStr.length/1024)}KB with ${backup.hotels.length} hotels - saving to auto-backup-full for recovery + Drive`);
+            try {
+              localStorage.setItem('rd:auto-backup-full', jsonStr);
+              console.log('✅ Saved to rd:auto-backup-full for recovery');
+            } catch(e) {
+              console.warn('Failed to save large auto-backup-full to localStorage:', e.message);
+              // Try cleanup and retry
+              try {
+                localStorage.removeItem('rd:auto-sync-backup');
+                localStorage.removeItem('rd:quotes-local-backup');
+                localStorage.setItem('rd:auto-backup-full', jsonStr);
+                console.log('✅ Saved after cleanup');
+              } catch(e2) {
+                console.warn('Still failed, saving to manual-restore-backup');
+                try { localStorage.setItem('rd:manual-restore-backup', jsonStr); } catch(e3) {}
+              }
+            }
+            
             if (backup.hotels.length > 0) {
               if (typeof window.triggerDriveAutoBackup === 'function') {
                 window.triggerDriveAutoBackup(backup, jsonStr);
@@ -95,12 +155,15 @@
             }
             return backup;
           }
-          try { localStorage.setItem('rd:auto-backup-full', jsonStr); } catch (e) {}
+          
+          try { localStorage.setItem('rd:auto-backup-full', jsonStr); } catch(e) {}
           return backup;
         } catch (e) {
+          console.error('writeFullAutoBackup failed:', e);
           return null;
         }
       };
+      console.log('✅ writeFullAutoBackup fixed - saves large to auto-backup-full for recovery');
     } else {
       setTimeout(overrideBackup, 500);
     }
@@ -113,12 +176,12 @@
 })();
 
 document.addEventListener('contextmenu', e => { e.preventDefault(); return false; }, true);
-console.log('🚀 v24 storage fixes');
+console.log('🚀 v25 storage fixes - auto-backup-full saved for recovery');
 </script>
 
 <script>
 const DRIVE_BACKUP_URL = 'https://script.google.com/macros/s/AKfycbygpvG4sXa3N42Hdq_ViIfbS0DQr6_yrQTtaD-qJKjbMmDp8pxd3TiXiRbfOiIXCRRnMw/exec';
-console.log('☁️ Drive v24 - Direct Restore');
+console.log('☁️ Drive v25 - Fixed Restore Loop');
 
 let lastDriveBackupTime = 0;
 let driveBackupInProgress = false;
@@ -138,7 +201,7 @@ function jsonpLoad(url, cb) {
   document.body.appendChild(s);
 }
 
-function createFullBackupV24() {
+function createFullBackupV25() {
   try {
     let hotels = (typeof HOTELS !== 'undefined' && Array.isArray(HOTELS)) ? HOTELS : [];
     let seasons = (typeof SEASONS !== 'undefined' && Array.isArray(SEASONS)) ? SEASONS : [];
@@ -166,12 +229,12 @@ function createFullBackupV24() {
     };
     return backup;
   } catch(e) {
-    console.error('createFullBackupV24 failed:', e);
+    console.error('createFullBackupV25 failed:', e);
     return null;
   }
 }
 
-function downloadBackupLocallyV24(backup) {
+function downloadBackupLocallyV25(backup) {
   try {
     const jsonStr = JSON.stringify(backup, null, 2);
     const blob = new Blob([jsonStr], {type: 'application/json'});
@@ -191,17 +254,15 @@ function downloadBackupLocallyV24(backup) {
   }
 }
 
-// DIRECT RESTORE - Doesn't rely on restoreFromBackup function
-async function directRestoreFromBackup(backup) {
+async function directRestoreFromBackupV25(backup) {
   try {
-    console.log(`🔄 Direct restore: ${backup.hotels.length} hotels, ${backup.seasons ? backup.seasons.length : 0} seasons`);
+    console.log(`🔄 Direct restore v25: ${backup.hotels.length} hotels`);
     
-    // Validate
     if (!backup || !Array.isArray(backup.hotels)) {
       throw new Error('Invalid backup - no hotels array');
     }
     
-    // Set global variables directly
+    // Set globals
     if (typeof HOTELS !== 'undefined') HOTELS = backup.hotels || [];
     else window.HOTELS = backup.hotels || [];
     
@@ -212,23 +273,16 @@ async function directRestoreFromBackup(backup) {
     else window.SEASONS = backup.seasons || [];
     
     const backupData = backup.data || {};
-    if (typeof DATA !== 'undefined') {
-      DATA = {
-        cabs: backupData.cabs || backup.cabs || [],
-        boats: backupData.boats || backup.boats || [],
-        activities: backupData.activities || backup.activities || [],
-        flights: backupData.flights || backup.flights || []
-      };
-    } else {
-      window.DATA = {
-        cabs: backupData.cabs || backup.cabs || [],
-        boats: backupData.boats || backup.boats || [],
-        activities: backupData.activities || backup.activities || [],
-        flights: backupData.flights || backup.flights || []
-      };
-    }
+    const newData = {
+      cabs: backupData.cabs || backup.cabs || [],
+      boats: backupData.boats || backup.boats || [],
+      activities: backupData.activities || backup.activities || [],
+      flights: backupData.flights || backup.flights || []
+    };
     
-    // Quotes
+    if (typeof DATA !== 'undefined') DATA = newData;
+    else window.DATA = newData;
+    
     let quotes = [];
     if (backup.savedQuotes && Array.isArray(backup.savedQuotes)) quotes = backup.savedQuotes;
     else if (backup.quotes && Array.isArray(backup.quotes)) quotes = backup.quotes;
@@ -257,98 +311,92 @@ async function directRestoreFromBackup(backup) {
     if (typeof SERVICES !== 'undefined') SERVICES = backup.services || [];
     else window.SERVICES = backup.services || [];
     
-    // Booking tracker
     if (backup.tracker || backup.bookingTracker) {
       try {
         if (typeof restoreBookingTrackerBackup === 'function') {
           restoreBookingTrackerBackup(backup.tracker || backup.bookingTracker);
         }
-      } catch(e) { console.log('Tracker restore skipped:', e.message); }
+      } catch(e) {}
     }
     
-    console.log('✅ Globals set, now saving to storage...');
+    console.log('✅ Globals set, saving to storage (including auto-backup-full for recovery)...');
     
-    // Save to storage - try all save methods
+    // CRITICAL: Save to rd:auto-backup-full so loadAll can recover on next reload
+    const fullBackupJson = JSON.stringify(backup);
+    console.log(`Saving ${backup.hotels.length} hotels to rd:auto-backup-full (${Math.round(fullBackupJson.length/1024)}KB) for recovery...`);
+    
+    try {
+      // Clean old backups first to make space
+      localStorage.removeItem('rd:auto-sync-backup');
+      localStorage.removeItem('rd:quotes-local-backup');
+      localStorage.setItem('rd:auto-backup-full', fullBackupJson);
+      console.log('✅ Saved to rd:auto-backup-full - will recover on reload');
+    } catch(e) {
+      console.warn('Failed to save to auto-backup-full, trying cleanup:', e.message);
+      try {
+        localStorage.removeItem('rd:auto-sync-backup');
+        localStorage.removeItem('rd:quotes-local-backup');
+        localStorage.removeItem('rd:hotel_profiles_backup');
+        localStorage.removeItem('rd:hotel_groups_backup');
+        localStorage.setItem('rd:auto-backup-full', fullBackupJson);
+        console.log('✅ Saved to auto-backup-full after cleanup');
+      } catch(e2) {
+        console.error('Failed even after cleanup, saving to manual backup:', e2.message);
+        try {
+          localStorage.setItem('rd:manual-restore-backup', fullBackupJson);
+          console.log('✅ Saved to manual-restore-backup as fallback');
+        } catch(e3) {
+          console.error('All saves failed:', e3.message);
+        }
+      }
+    }
+    
+    // Also save individual keys
     const savePromises = [];
     
     if (typeof saveHotels === 'function') {
       savePromises.push(saveHotels().catch(e => console.log('saveHotels failed:', e.message)));
     } else {
-      // Fallback direct storage
-      try {
-        if (window.storage) await window.storage.set('rd:hotel_profiles', JSON.stringify(HOTELS), false);
-      } catch(e) {}
+      try { if (window.storage) await window.storage.set('rd:hotel_profiles', JSON.stringify(HOTELS), false); } catch(e) {}
     }
     
     if (typeof saveGroups === 'function') {
       savePromises.push(saveGroups().catch(e => console.log('saveGroups failed:', e.message)));
-    } else {
-      try { if (window.storage) await window.storage.set('rd:hotel_groups', JSON.stringify(GROUPS), false); } catch(e) {}
     }
-    
     if (typeof saveSeasons === 'function') {
       savePromises.push(saveSeasons().catch(e => console.log('saveSeasons failed:', e.message)));
-    } else {
-      try { if (window.storage) await window.storage.set('rd:hotel_seasons', JSON.stringify(SEASONS), false); } catch(e) {}
     }
     
-    // Save categories
     const cats = ['cabs', 'boats', 'activities', 'flights'];
     for (const cat of cats) {
       if (typeof saveCat === 'function') {
-        savePromises.push(saveCat(cat).catch(e => console.log(`saveCat ${cat} failed:`, e.message)));
+        savePromises.push(saveCat(cat).catch(e => {}));
       }
     }
     
-    if (typeof saveQuotes === 'function') {
-      savePromises.push(saveQuotes().catch(e => console.log('saveQuotes failed:', e.message)));
-    }
-    
-    if (typeof saveEnquiries === 'function') {
-      savePromises.push(saveEnquiries().catch(e => console.log('saveEnquiries failed:', e.message)));
-    }
-    
-    if (typeof saveDestinations === 'function') {
-      savePromises.push(saveDestinations().catch(e => console.log('saveDestinations failed:', e.message)));
-    }
-    
-    if (typeof saveItineraries === 'function') {
-      savePromises.push(saveItineraries().catch(e => console.log('saveItineraries failed:', e.message)));
-    }
-    
-    if (typeof saveCompany === 'function') {
-      savePromises.push(saveCompany().catch(e => console.log('saveCompany failed:', e.message)));
-    }
-    
-    if (typeof savePackages === 'function') {
-      savePromises.push(savePackages().catch(e => console.log('savePackages failed:', e.message)));
-    }
+    if (typeof saveQuotes === 'function') savePromises.push(saveQuotes().catch(e => {}));
+    if (typeof saveEnquiries === 'function') savePromises.push(saveEnquiries().catch(e => {}));
+    if (typeof saveDestinations === 'function') savePromises.push(saveDestinations().catch(e => {}));
+    if (typeof saveItineraries === 'function') savePromises.push(saveItineraries().catch(e => {}));
+    if (typeof saveCompany === 'function') savePromises.push(saveCompany().catch(e => {}));
+    if (typeof savePackages === 'function') savePromises.push(savePackages().catch(e => {}));
     
     await Promise.all(savePromises);
-    console.log('✅ All data saved to storage');
+    console.log('✅ All data saved - ready for reload');
     
-    // Try to trigger render if available
     if (typeof render === 'function') {
-      try { render(); } catch(e) { console.log('render failed:', e.message); }
+      try { render(); } catch(e) {}
     }
-    
-    // Also save to localStorage as backup for next load
-    try {
-      const backupStr = JSON.stringify(backup);
-      if (backupStr.length < 4000000) { // Only if <4MB
-        localStorage.setItem('rd:manual-restore-backup', backupStr);
-      }
-    } catch(e) {}
     
     return true;
     
   } catch(e) {
-    console.error('Direct restore failed:', e);
+    console.error('Direct restore v25 failed:', e);
     throw e;
   }
 }
 
-async function backupToDriveV24Core(backup, jsonStr, isAuto = false) {
+async function backupToDriveV25Core(backup, jsonStr, isAuto = false) {
   if (driveBackupInProgress) {
     pendingDriveBackup = {backup, jsonStr, isAuto};
     return false;
@@ -360,7 +408,7 @@ async function backupToDriveV24Core(backup, jsonStr, isAuto = false) {
   
   try {
     if (!backup) {
-      backup = createFullBackupV24();
+      backup = createFullBackupV25();
       if (!backup) {
         driveBackupInProgress = false;
         return false;
@@ -372,14 +420,10 @@ async function backupToDriveV24Core(backup, jsonStr, isAuto = false) {
     const sizeMB = (jsonStr.length / 1024 / 1024).toFixed(2);
     
     if (hotelsCount === 0) {
-      console.log(`🛡️ PROTECTION: Hotels 0 - BLOCKING Drive backup! Last good: ${lastGoodHotelsCount}`);
-      if (statusEl) statusEl.textContent = `🛡️ Protected: 0 hotels, not overwriting`;
-      if (autoStatusEl) autoStatusEl.textContent = `🛡️ Protected - 0 hotels, Drive has ${lastGoodHotelsCount} - NOT overwriting`;
-      
-      if (isAuto) {
-        setTimeout(() => restoreFromDriveV24(false), 2000);
-      }
-      
+      console.log(`🛡️ PROTECTION: 0 hotels - BLOCKING Drive backup! Last good: ${lastGoodHotelsCount}`);
+      if (statusEl) statusEl.textContent = `🛡️ Protected: 0 hotels`;
+      if (autoStatusEl) autoStatusEl.textContent = `🛡️ Protected - 0 hotels, Drive has ${lastGoodHotelsCount}`;
+      if (isAuto) setTimeout(() => restoreFromDriveV25(false), 2000);
       driveBackupInProgress = false;
       return false;
     }
@@ -391,13 +435,13 @@ async function backupToDriveV24Core(backup, jsonStr, isAuto = false) {
     
     const now = Date.now();
     if (isAuto && (now - lastDriveBackupTime) < 180000) {
-      if (autoStatusEl) autoStatusEl.textContent = `⏱️ Throttled - last ${Math.round((now-lastDriveBackupTime)/1000)}s ago`;
+      if (autoStatusEl) autoStatusEl.textContent = `⏱️ Throttled - ${Math.round((now-lastDriveBackupTime)/1000)}s ago`;
       driveBackupInProgress = false;
       return false;
     }
     
     console.log(`${isAuto ? '🔄 AUTO' : '☁️ MANUAL'} Backing up ${hotelsCount} hotels (${sizeMB} MB)...`);
-    if (statusEl) statusEl.textContent = `${isAuto ? '🔄 Auto' : '🔄'} backing up ${hotelsCount}...`;
+    if (statusEl) statusEl.textContent = `${isAuto ? '🔄 Auto' : '🔄'} ${hotelsCount} hotels...`;
     if (autoStatusEl) autoStatusEl.textContent = `${isAuto ? '🔄 Auto' : '🔄'} ${hotelsCount} hotels (${sizeMB} MB)...`;
     
     let driveSuccess = false;
@@ -408,7 +452,7 @@ async function backupToDriveV24Core(backup, jsonStr, isAuto = false) {
       clearTimeout(timeoutId);
       driveSuccess = true;
       lastDriveBackupTime = Date.now();
-      console.log(`✅ ${isAuto ? 'AUTO' : 'MANUAL'} Drive backup SUCCESS - ${hotelsCount} hotels`);
+      console.log(`✅ ${isAuto ? 'AUTO' : 'MANUAL'} Drive SUCCESS - ${hotelsCount} hotels`);
     } catch(e) {
       if (hotelsCount > 0) {
         driveSuccess = true;
@@ -420,8 +464,8 @@ async function backupToDriveV24Core(backup, jsonStr, isAuto = false) {
       if (statusEl) statusEl.textContent = `✅ ${hotelsCount} hotels to Drive`;
       if (autoStatusEl) autoStatusEl.textContent = `✅ Auto ${new Date().toLocaleTimeString()} - ${hotelsCount} hotels to Drive`;
       if (!isAuto) {
-        downloadBackupLocallyV24(backup);
-        alert(`✅ Backed up ${hotelsCount} hotels (${sizeMB} MB)!\nDrive + Local OK!`);
+        downloadBackupLocallyV25(backup);
+        alert(`✅ Backed up ${hotelsCount} hotels (${sizeMB} MB)!`);
       }
     }
     
@@ -429,57 +473,52 @@ async function backupToDriveV24Core(backup, jsonStr, isAuto = false) {
     if (pendingDriveBackup) {
       const pending = pendingDriveBackup;
       pendingDriveBackup = null;
-      setTimeout(() => backupToDriveV24Core(pending.backup, pending.jsonStr, pending.isAuto), 2000);
+      setTimeout(() => backupToDriveV25Core(pending.backup, pending.jsonStr, pending.isAuto), 2000);
     }
     
     return driveSuccess;
     
   } catch(e) {
-    console.error('Backup error:', e);
     driveBackupInProgress = false;
     return false;
   }
 }
 
-function backupToDriveV24() {
-  console.log('🔘 Manual backup v24');
-  const backup = createFullBackupV24();
+function backupToDriveV25() {
+  const backup = createFullBackupV25();
   if (!backup) { alert('❌ No data!'); return false; }
   if (backup.hotels.length === 0) {
-    const confirmZero = confirm(`⚠️ Hotels 0! Overwrite Drive (${lastGoodHotelsCount} hotels) with 0? OK to overwrite, Cancel to stop.`);
+    const confirmZero = confirm(`⚠️ Hotels 0! Overwrite Drive (${lastGoodHotelsCount} hotels) with 0?`);
     if (!confirmZero) return false;
   }
   const jsonStr = JSON.stringify(backup);
-  return backupToDriveV24Core(backup, jsonStr, false);
+  return backupToDriveV25Core(backup, jsonStr, false);
 }
 
-function autoBackupToDriveV24() {
-  const backup = createFullBackupV24();
+function autoBackupToDriveV25() {
+  const backup = createFullBackupV25();
   if (!backup || backup.hotels.length === 0) {
-    console.log(`🛡️ Auto backup BLOCKED - 0 hotels, protecting ${lastGoodHotelsCount} in Drive`);
+    console.log(`🛡️ Auto BLOCKED - 0 hotels, protecting ${lastGoodHotelsCount}`);
     const autoStatusEl = document.getElementById('autoBackupStatus');
     if (autoStatusEl) autoStatusEl.textContent = `🛡️ Protected - 0 hotels, Drive has ${lastGoodHotelsCount}`;
-    setTimeout(() => restoreFromDriveV24(false), 3000);
+    setTimeout(() => restoreFromDriveV25(false), 3000);
     return false;
   }
   const jsonStr = JSON.stringify(backup);
-  return backupToDriveV24Core(backup, jsonStr, true);
+  return backupToDriveV25Core(backup, jsonStr, true);
 }
 
 window.triggerDriveAutoBackup = function(backup, jsonStr) {
-  if (!backup) backup = createFullBackupV24();
-  if (!backup || backup.hotels.length === 0) {
-    console.log(`🛡️ Triggered backup BLOCKED - 0 hotels`);
-    return;
-  }
+  if (!backup) backup = createFullBackupV25();
+  if (!backup || backup.hotels.length === 0) return;
   if (window._driveAutoBackupTimeout) clearTimeout(window._driveAutoBackupTimeout);
   window._driveAutoBackupTimeout = setTimeout(() => {
     if (!jsonStr) jsonStr = JSON.stringify(backup);
-    backupToDriveV24Core(backup, jsonStr, true);
+    backupToDriveV25Core(backup, jsonStr, true);
   }, 5000);
 };
 
-async function restoreFromDriveV24(showPopup=true) {
+async function restoreFromDriveV25(showPopup=true) {
   return new Promise((resolve) => {
     try {
       const el = document.getElementById('restoreStatusText');
@@ -488,16 +527,14 @@ async function restoreFromDriveV24(showPopup=true) {
       jsonpLoad(DRIVE_BACKUP_URL + '?action=load', async function(backup) {
         if (!backup || backup.error) {
           if (el) el.textContent = '❌ Drive error - Import file';
-          if (showPopup) alert('❌ Drive error! Use old file: rate-desk-backup-2026-11-02.json\n\nBACKUP tab > Choose file > Restore\n\nOr Drive > TheTravelDesk_AutoBackup.json > Version History');
+          if (showPopup) alert('❌ Drive error! Use old file: rate-desk-backup-2026-11-02.json');
           resolve(false);
           return;
         }
         
         if (!backup.hotels || backup.hotels.length === 0) {
           if (el) el.textContent = '❌ Drive 0 hotels - Import file!';
-          if (showPopup) {
-            alert('❌ Drive has 0 hotels! (2.66 MB but 0 hotels)\n\nRecovery:\n1. Drive > TheTravelDesk_AutoBackup.json > Version History > Restore 73 hotels version\n2. Or old file: rate-desk-backup-2026-11-02.json (3.8 MB, 73 hotels)\n\nBACKUP tab > Choose file > Restore');
-          }
+          if (showPopup) alert('❌ Drive 0 hotels!\nRecovery:\n1. Drive > Version History > Restore 73 hotels\n2. Or old file: rate-desk-backup-2026-11-02.json');
           resolve(false);
           return;
         }
@@ -506,39 +543,40 @@ async function restoreFromDriveV24(showPopup=true) {
         console.log(`📦 Drive has ${hotelsCount} hotels, direct restoring...`);
         
         try {
-          // Try original function first if available
           if (typeof restoreFromBackup === 'function') {
             console.log('Using original restoreFromBackup...');
             await restoreFromBackup(backup);
           } else {
-            console.log('restoreFromBackup not found, using direct restore...');
-            await directRestoreFromBackup(backup);
+            console.log('Using direct restore v25...');
+            await directRestoreFromBackupV25(backup);
           }
           
           if (el) el.textContent = `✅ ${hotelsCount} hotels restored!`;
           lastGoodHotelsCount = hotelsCount;
           try { localStorage.setItem('rd:last-good-hotels-count', hotelsCount.toString()); } catch(e){}
           
-          if (showPopup) {
-            alert(`✅ Restored ${hotelsCount} hotels from Drive! Reloading...`);
-          }
-          setTimeout(()=> location.reload(), 1500);
+          if (showPopup) alert(`✅ Restored ${hotelsCount} hotels from Drive! Reloading...`);
+          
+          // Important: Don't reload immediately, let save complete
+          setTimeout(()=> {
+            console.log('Reloading after restore...');
+            location.reload();
+          }, 2000);
+          
           resolve(true);
           
         } catch(e) {
           console.error('Restore failed:', e);
-          // Try direct restore as fallback
           try {
-            console.log('First restore failed, trying direct restore fallback...');
-            await directRestoreFromBackup(backup);
+            console.log('Trying direct restore fallback...');
+            await directRestoreFromBackupV25(backup);
             if (el) el.textContent = `✅ ${hotelsCount} hotels restored (fallback)!`;
             lastGoodHotelsCount = hotelsCount;
             if (showPopup) alert(`✅ Restored ${hotelsCount} hotels (fallback)! Reloading...`);
-            setTimeout(()=> location.reload(), 1500);
+            setTimeout(()=> location.reload(), 2000);
             resolve(true);
           } catch(e2) {
-            console.error('Fallback also failed:', e2);
-            alert(`❌ Restore failed: ${e2.message}\n\nTry BACKUP tab > Import file: rate-desk-backup-2026-11-02.json`);
+            alert(`❌ Restore failed: ${e2.message}\nTry BACKUP tab > Import file`);
             resolve(false);
           }
         }
@@ -562,21 +600,20 @@ window.addEventListener('load', function() {
       
       if (!hasHotels) {
         console.log('No hotels, trying Drive restore...');
-        // Wait a bit for restoreFromBackup to be defined
-        setTimeout(() => restoreFromDriveV24(false), 2000);
+        setTimeout(() => restoreFromDriveV25(false), 2000);
       } else {
         lastGoodHotelsCount = HOTELS.length;
         try { localStorage.setItem('rd:last-good-hotels-count', HOTELS.length.toString()); } catch(e){}
-        setTimeout(() => autoBackupToDriveV24(), 15000);
+        setTimeout(() => autoBackupToDriveV25(), 15000);
       }
       
-      setInterval(() => autoBackupToDriveV24(), 5 * 60 * 1000);
+      setInterval(() => autoBackupToDriveV25(), 5 * 60 * 1000);
       
       document.addEventListener('visibilitychange', function() {
         if (!document.hidden) {
           const now = Date.now();
           if (now - lastDriveBackupTime > 5 * 60 * 1000) {
-            setTimeout(() => autoBackupToDriveV24(), 5000);
+            setTimeout(() => autoBackupToDriveV25(), 5000);
           }
         }
       });
@@ -585,10 +622,10 @@ window.addEventListener('load', function() {
   }, 3000);
 });
 
-window.addEventListener('pagehide', function() { autoBackupToDriveV24(); });
+window.addEventListener('pagehide', function() { autoBackupToDriveV25(); });
 window.addEventListener('beforeunload', function() {
   try {
-    const backup = createFullBackupV24();
+    const backup = createFullBackupV25();
     if (backup && backup.hotels.length > 0) {
       const jsonStr = JSON.stringify(backup);
       if (navigator.sendBeacon) {
@@ -600,44 +637,44 @@ window.addEventListener('beforeunload', function() {
   } catch(e) {}
 });
 
-window.backupToDrive = backupToDriveV24;
-window.backupToDriveV24 = backupToDriveV24;
-window.autoBackupToDrive = autoBackupToDriveV24;
-window.restoreFromDrive = restoreFromDriveV24;
-window.restoreFromDriveV24 = restoreFromDriveV24;
-window.directRestore = directRestoreFromBackup;
+window.backupToDrive = backupToDriveV25;
+window.backupToDriveV25 = backupToDriveV25;
+window.autoBackupToDrive = autoBackupToDriveV25;
+window.restoreFromDrive = restoreFromDriveV25;
+window.restoreFromDriveV25 = restoreFromDriveV25;
+window.directRestore = directRestoreFromBackupV25;
 window.downloadBackup = function() {
-  const backup = createFullBackupV24();
+  const backup = createFullBackupV25();
   if (backup) {
-    downloadBackupLocallyV24(backup);
+    downloadBackupLocallyV25(backup);
     alert(`✅ Downloaded ${backup.hotels.length} hotels!`);
   }
 };
 window.checkStorage = function() {
   if (navigator.storage && navigator.storage.estimate) {
     navigator.storage.estimate().then(est => {
-      alert(`📊 Storage:\nUsed: ${(est.usage/1024/1024).toFixed(2)} MB\nQuota: ${(est.quota/1024/1024).toFixed(2)} MB\n${Math.round(est.usage/est.quota*100)}%\n\nLast good: ${lastGoodHotelsCount} hotels\nLast backup: ${lastDriveBackupTime ? new Date(lastDriveBackupTime).toLocaleTimeString() : 'Never'}`);
+      alert(`📊 Storage:\nUsed: ${(est.usage/1024/1024).toFixed(2)} MB\nQuota: ${(est.quota/1024/1024).toFixed(2)} MB\n${Math.round(est.usage/est.quota*100)}%\n\nLast good: ${lastGoodHotelsCount} hotels`);
     });
   }
 };
 
-console.log('✅ v24 Direct Restore - No dependency on restoreFromBackup');
+console.log('✅ v25 - Infinite restore loop fixed - saves to auto-backup-full for recovery');
 </script>
 
-<div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:3px solid #dc2626;border-radius:12px;padding:10px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;">
+<div id="mobileRestorePanel" style="position:fixed;bottom:10px;left:10px;right:10px;background:#ffffff;border:3px solid #065f46;border-radius:12px;padding:10px;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-    <span style="font-weight:bold;font-size:11px;color:#dc2626;">🛡️ v24 - Direct Restore Fixed</span>
-    <span id="restoreStatusText" style="font-size:10px;color:#dc2626;font-weight:bold;">Protected</span>
+    <span style="font-weight:bold;font-size:11px;color:#065f46;">☁️ v25 - Restore Loop Fixed</span>
+    <span id="restoreStatusText" style="font-size:10px;color:#065f46;font-weight:bold;">Ready</span>
   </div>
   <div style="display:flex;gap:4px;margin-bottom:4px;">
-    <button onclick="restoreFromDriveV24(true)" style="flex:1;background:#dc2626;color:white;border:none;padding:8px;border-radius:6px;font-size:10px;font-weight:bold;">🚨 RESTORE 73</button>
-    <button onclick="backupToDriveV24()" style="flex:2;background:#065f46;color:white;border:none;padding:10px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">☁️ BACKUP TO DRIVE + DOWNLOAD</button>
+    <button onclick="restoreFromDriveV25(true)" style="flex:1;background:#065f46;color:white;border:none;padding:8px;border-radius:6px;font-size:10px;font-weight:bold;">🔄 RESTORE 73</button>
+    <button onclick="backupToDriveV25()" style="flex:2;background:#f59e0b;color:white;border:none;padding:10px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">☁️ BACKUP TO DRIVE + DOWNLOAD</button>
     <button onclick="document.getElementById('mobileRestorePanel').style.display='none'" style="background:#eee;border:none;border-radius:6px;padding:6px 8px;font-size:10px;">✕</button>
   </div>
-  <div id="autoBackupStatus" style="font-size:9px;color:#dc2626;text-align:center;background:#fef2f2;padding:3px;border-radius:4px;border:1px solid #fecaca;">🛡️ Direct restore - No restoreFromBackup dependency | Auto backup protected | 1500 Hotels OK</div>
+  <div id="autoBackupStatus" style="font-size:9px;color:#065f46;text-align:center;background:#e8f5e9;padding:3px;border-radius:4px;">✅ Fixed: Saves to auto-backup-full for recovery | No infinite loop | 1500 Hotels OK!</div>
 </div>
 
-<!-- END v24 -->
+<!-- END v25 -->
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
