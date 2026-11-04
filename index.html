@@ -1,8 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-
 <script>
 // v31 GUARD - Prevent 0 hotels overwrite + Silent Drive errors
 (function(){
@@ -13506,8 +13504,23 @@ Respond ONLY with a raw JSON array (no markdown fences, no extra text) of ${skel
     const notesList = quoteNotesForDoc(q).split('\n').map(s=>s.trim()).filter(Boolean);
     const qr = upiQrUrl(co, isOptionQuote(q)?null:grand);
 
-    const dayCardsHtml = q.days.filter(d=>d.title||d.activities||d.location).map((d,i)=>{
-      const acts = (d.activities||'').split('\n').map(s=>s.trim()).filter(Boolean);
+    const dayCardsHtml = q.days.filter(d=>d.title||d.activities||d.location||d.routeProgram).map((d,i)=>{
+      // Robust activities parsing - handles string, array, or pipe-separated
+      let rawActs = d.activities;
+      if(Array.isArray(rawActs)) rawActs = rawActs.join('\n');
+      rawActs = String(rawActs||'').trim();
+      // If activities empty, try routeProgram or title details as fallback
+      if(!rawActs && d.routeProgram) rawActs = d.routeProgram;
+      let acts = [];
+      if(rawActs){
+        // Support newline, pipe, or bullet separators
+        if(rawActs.includes('\n')) acts = rawActs.split('\n');
+        else if(rawActs.includes(' | ')) acts = rawActs.split(' | ');
+        else if(rawActs.includes('|')) acts = rawActs.split('|');
+        else acts = [rawActs];
+        acts = acts.map(s=>s.replace(/^[-•●]\s*/,'').trim()).filter(Boolean);
+      }
+      const displayTitle = (d.title && d.title.trim()) ? d.title.trim() : (d.routeProgram && d.routeProgram.trim() ? d.routeProgram.trim() : (d.location ? `${d.location} Exploration & Overnight Stay` : `Day ${i+1} Itinerary`));
       
       // Use quote-level room details if day-level is not filled
       const dayRooms = Number(d.rooms) || Number(q.rooms) || 0;
@@ -13530,7 +13543,7 @@ Respond ONLY with a raw JSON array (no markdown fences, no extra text) of ${skel
         <div class="detailed-day-header" style="background:#FEF6F0; color:#20302E; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
           <div style="display:flex; align-items:baseline; gap:12px;">
             <div style="font-size:12px; letter-spacing:.1em; opacity:.88; text-transform:uppercase; font-weight:600;">Day ${i+1}</div>
-            <div style="font-size:18px; font-weight:700; line-height:1.2;">${d.title||'—'}</div>
+            <div style="font-size:18px; font-weight:700; line-height:1.2;">${displayTitle}</div>
           </div>
           <div style="text-align:right; font-size:12px; opacity:.95;">
             ${d.location?`<div style="font-weight:500;">📍 ${d.location}</div>`:''}
@@ -16879,7 +16892,6 @@ Respond ONLY with a raw JSON array (no markdown fences, no extra text) of ${skel
 
 <div id="rd-print-area" style="display:none;"></div>
 
-</script>
 </head>
 <body>
 </body>
