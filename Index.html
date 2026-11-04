@@ -15879,6 +15879,7 @@ Respond ONLY with a raw JSON array (no markdown fences, no extra text) of ${skel
             <tr><td>Saved Quotes</td><td class="rd-rate">${SAVED_QUOTES.length}</td></tr>
             <tr><td>Enquiries</td><td class="rd-rate">${ENQUIRIES.length}</td></tr>
             <tr><td>Custom Destinations</td><td class="rd-rate">${CUSTOM_DESTINATIONS.length}</td></tr>
+            <tr><td>🗺 Itineraries</td><td class="rd-rate" style="font-weight:700; color:#065f46;">${ITINERARIES.length} (${ITINERARIES.reduce((sum,it)=>sum+(it.days?.length||0),0)} days)</td></tr>
             <tr><td>Holiday Packages</td><td class="rd-rate">${PACKAGES.length}</td></tr>
             <tr><td>Booking Tracker Records</td><td class="rd-rate">${readBookingTrackerBackup().bookings.length}</td></tr>
           </tbody>
