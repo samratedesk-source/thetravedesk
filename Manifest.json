@@ -1,0 +1,21 @@
+{
+  "name": "The Travel Desk - Travel Management System",
+  "short_name": "Travel Desk",
+  "description": "Complete Travel Management System for Travel Agencies - Final Itinerary Added",
+  "start_url": "./index.html?v=final-2",
+  "display": "standalone",
+  "background_color": "#FAF6EE",
+  "theme_color": "#0F3D3E",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
